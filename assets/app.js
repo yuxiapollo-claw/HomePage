@@ -152,8 +152,6 @@
   function renderPortal() {
     const config = state.config;
     const systems = filterSystems();
-    const themeLabel = theme === 'starbucks' ? 'Starbucks 风格' : 'Mintlify 风格';
-
     root.innerHTML = `
       <header class="top-nav">
         <a class="brand" href="${theme === 'starbucks' ? 'starbucks.html' : 'index.html'}" aria-label="${escapeHtml(config.organization.portalName)}首页">
@@ -164,7 +162,6 @@
           </span>
         </a>
         <nav class="nav-actions" aria-label="主题与帮助">
-          <span class="theme-chip">${themeLabel}</span>
           <a class="button button-secondary" href="admin.html">系统管理员</a>
           <a class="button button-primary" href="#systems">查看入口</a>
         </nav>
@@ -206,11 +203,6 @@
       </div>
 
       <section id="systems" class="systems-section">
-        <div class="section-heading">
-          <span class="eyebrow">Service catalog</span>
-          <h2>系统入口</h2>
-          <p>${escapeHtml(config.organization.subtitle)}</p>
-        </div>
         ${renderCategories()}
         <div id="system-results">${renderSystems(systems)}</div>
       </section>

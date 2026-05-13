@@ -65,7 +65,7 @@ test('client app implements search, category filters, and empty state hooks', as
   assert.match(app, /empty-state/);
 });
 
-test('public portal links to admin page and uses three wider cards per row for image entries', async () => {
+test('public portal links to admin page and uses a compact five-column card wall on desktop', async () => {
   const app = await readFile('assets/app.js', 'utf8');
   const styles = await readFile('assets/styles.css', 'utf8');
 
@@ -74,11 +74,14 @@ test('public portal links to admin page and uses three wider cards per row for i
   assert.match(app, /system-card-layout/);
   assert.match(app, /system-card-image/);
   assert.match(app, /portal-divider-line"><\/div>\s*<div class="portal-divider-line"/);
+  assert.doesNotMatch(app, /theme-chip/);
+  assert.doesNotMatch(app, /section-heading/);
   assert.match(styles, /\.system-card-image/);
-  assert.match(styles, /\.system-grid\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(styles, /\.system-grid\s*{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(styles, /\.system-card-layout/);
   assert.match(styles, /\.system-card-layout\s*{[^}]*grid-template-columns:\s*1fr/s);
-  assert.match(styles, /\.system-card-media\s*{[^}]*min-height:\s*240px/s);
+  assert.match(styles, /\.system-card-media\s*{[^}]*min-height:\s*112px/s);
+  assert.match(styles, /\.hero-section\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.2fr\)\s+minmax\(280px,\s*0\.68fr\)/s);
   assert.match(styles, /aspect-ratio:\s*16 \/ 9/);
 });
 
