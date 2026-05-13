@@ -1,0 +1,143 @@
+{
+  "organization": {
+    "name": "中国医学科学院医学生物学研究所",
+    "portalName": "系统服务导航门户",
+    "subtitle": "统一入口，快速访问常用业务系统",
+    "description": "面向所内办公、业务办理、数据查询和管理工具的集中导航页面。",
+    "support": "信息化管理部门"
+  },
+  "metrics": [
+    { "label": "系统入口", "value": "12" },
+    { "label": "服务分类", "value": "4" },
+    { "label": "访问环境", "value": "内网" }
+  ],
+  "categories": [
+    { "id": "all", "name": "全部入口" },
+    { "id": "common", "name": "常用系统" },
+    { "id": "business", "name": "业务办理" },
+    { "id": "data", "name": "数据查询" },
+    { "id": "admin", "name": "管理工具" }
+  ],
+  "systems": [
+    {
+      "id": "oa",
+      "name": "办公协同系统",
+      "description": "通知公告、流程审批、内部沟通等日常办公入口占位。",
+      "category": "common",
+      "url": "#",
+      "status": "待配置",
+      "icon": "layout-dashboard",
+      "tags": ["办公", "审批", "内网"]
+    },
+    {
+      "id": "asset",
+      "name": "资产设备管理",
+      "description": "设备台账、资产领用、维护记录等管理入口占位。",
+      "category": "business",
+      "url": "#",
+      "status": "待配置",
+      "icon": "boxes",
+      "tags": ["资产", "设备", "台账"]
+    },
+    {
+      "id": "inventory",
+      "name": "计算机化系统清单",
+      "description": "计算机化系统清单维护、查询和状态管理入口占位。",
+      "category": "data",
+      "url": "#",
+      "status": "待配置",
+      "icon": "database",
+      "tags": ["清单", "查询", "数据"]
+    },
+    {
+      "id": "lims",
+      "name": "实验室信息系统",
+      "description": "样本、检测、记录和实验室流程管理入口占位。",
+      "category": "business",
+      "url": "#",
+      "status": "待配置",
+      "icon": "flask",
+      "tags": ["实验室", "样本", "检测"]
+    },
+    {
+      "id": "document",
+      "name": "文档管理平台",
+      "description": "制度文件、模板资料、归档文档统一检索入口占位。",
+      "category": "common",
+      "url": "#",
+      "status": "待配置",
+      "icon": "file-text",
+      "tags": ["文档", "制度", "模板"]
+    },
+    {
+      "id": "report",
+      "name": "统计报表中心",
+      "description": "业务指标、数据报表、分析看板集中查看入口占位。",
+      "category": "data",
+      "url": "#",
+      "status": "待配置",
+      "icon": "chart",
+      "tags": ["报表", "统计", "看板"]
+    },
+    {
+      "id": "account",
+      "name": "账号权限管理",
+      "description": "用户、角色、权限和访问申请管理入口占位。",
+      "category": "admin",
+      "url": "#",
+      "status": "待配置",
+      "icon": "shield",
+      "tags": ["账号", "权限", "管理"]
+    },
+    {
+      "id": "helpdesk",
+      "name": "信息化服务台",
+      "description": "系统问题反馈、运维工单、技术支持入口占位。",
+      "category": "admin",
+      "url": "#",
+      "status": "待配置",
+      "icon": "life-buoy",
+      "tags": ["运维", "工单", "支持"]
+    },
+    {
+      "id": "training",
+      "name": "培训学习平台",
+      "description": "在线培训、制度学习、考试记录入口占位。",
+      "category": "common",
+      "url": "#",
+      "status": "待配置",
+      "icon": "graduation",
+      "tags": ["培训", "学习", "考试"]
+    },
+    {
+      "id": "purchase",
+      "name": "采购申请系统",
+      "description": "采购申请、审批流转、进度查询入口占位。",
+      "category": "business",
+      "url": "#",
+      "status": "待配置",
+      "icon": "clipboard",
+      "tags": ["采购", "审批", "流程"]
+    },
+    {
+      "id": "quality",
+      "name": "质量管理系统",
+      "description": "偏差、变更、CAPA、质量记录管理入口占位。",
+      "category": "business",
+      "url": "#",
+      "status": "待配置",
+      "icon": "check-circle",
+      "tags": ["质量", "记录", "流程"]
+    },
+    {
+      "id": "meeting",
+      "name": "会议预约系统",
+      "description": "会议室查询、预约申请、会议安排入口占位。",
+      "category": "common",
+      "url": "#",
+      "status": "待配置",
+      "icon": "calendar",
+      "tags": ["会议", "预约", "办公"]
+    }
+  ]
+}
