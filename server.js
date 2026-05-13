@@ -314,6 +314,26 @@ function createServer(options = {}) {
         return;
       }
 
+      if (url.pathname === '/api/config' && request.method === 'PUT') {
+        if (!requireAuth(request, response, sessions)) return;
+        const body = await readRequestBody(request);
+        const config = await readConfig(configPath);
+        if (!Array.isArray(body.systems)) {
+          jsonResponse(response, 400, { error: 'Systems array is required' });
+          return;
+        }
+        const existingIds = new Set(config.systems.map((item) => item.id));
+        const nextIds = new Set(body.systems.map((item) => item && item.id));
+        if (existingIds.size !== nextIds.size || [...existingIds].some((id) => !nextIds.has(id))) {
+          jsonResponse(response, 400, { error: 'Systems payload must contain the same ids' });
+          return;
+        }
+        config.systems = body.systems;
+        await writeConfig(rootDir, configPath, config);
+        jsonResponse(response, 200, { config });
+        return;
+      }
+
       if (url.pathname === '/api/upload' && request.method === 'POST') {
         if (!requireAuth(request, response, sessions)) return;
         const parts = await parseMultipart(request);

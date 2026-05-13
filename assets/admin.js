@@ -120,6 +120,11 @@
     return category ? category.name : id;
   }
 
+  function selectedSystemIndex() {
+    if (!state.config || !state.selectedId) return -1;
+    return state.config.systems.findIndex((system) => system.id === state.selectedId);
+  }
+
   function previewIconLabel(icon) {
     const parts = String(icon || 'FI').split('-');
     return parts.map((part) => part.charAt(0)).join('').slice(0, 2).toUpperCase() || 'FI';
@@ -173,6 +178,8 @@
 
   function renderList() {
     const systems = filteredSystems();
+    const selectedIndex = selectedSystemIndex();
+    const isSearching = Boolean(state.query.trim());
     return `
       <section class="admin-list-panel">
         <div class="admin-panel-head">
@@ -186,6 +193,11 @@
           <span class="sr-only">搜索系统入口</span>
           <input type="search" placeholder="搜索名称、描述、分类或标签" value="${escapeHtml(state.query)}" data-admin-search>
         </label>
+        <div class="admin-order-actions">
+          <button class="button button-secondary" type="button" data-move-up ${selectedIndex <= 0 || isSearching ? 'disabled' : ''}>上移</button>
+          <button class="button button-secondary" type="button" data-move-down ${selectedIndex === -1 || selectedIndex >= state.config.systems.length - 1 || isSearching ? 'disabled' : ''}>下移</button>
+          <span class="admin-order-hint">${isSearching ? '搜索状态下不可调整顺序' : '选择卡片后可调整显示顺序'}</span>
+        </div>
         <div class="admin-card-list">
           ${systems.map((system) => `
             <button class="admin-system-row ${state.selectedId === system.id ? 'is-active' : ''}" type="button" data-edit-id="${escapeHtml(system.id)}">
@@ -319,7 +331,6 @@
           </span>
         </a>
         <nav class="nav-actions" aria-label="管理操作">
-          <span class="theme-chip">Mintlify 风格</span>
           <a class="button button-secondary" href="index.html">查看入口</a>
           <button class="button button-primary" type="button" data-logout>退出登录</button>
         </nav>
@@ -375,6 +386,8 @@
       renderAdmin();
       root.querySelector('[data-admin-search]')?.focus();
     });
+    root.querySelector('[data-move-up]')?.addEventListener('click', () => moveSystem(-1));
+    root.querySelector('[data-move-down]')?.addEventListener('click', () => moveSystem(1));
     root.querySelectorAll('[data-edit-id]').forEach((button) => {
       button.addEventListener('click', () => {
         state.selectedId = button.dataset.editId;
@@ -516,6 +529,33 @@
       renderAdmin();
     } catch (error) {
       setUploadNotice(error.message);
+      renderAdmin();
+    }
+  }
+
+  async function moveSystem(direction) {
+    if (!state.config || state.query.trim()) return;
+    const index = selectedSystemIndex();
+    if (index === -1) return;
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= state.config.systems.length) return;
+
+    const systems = state.config.systems.slice();
+    const [moved] = systems.splice(index, 1);
+    systems.splice(nextIndex, 0, moved);
+
+    try {
+      const result = await api('/api/config', {
+        method: 'PUT',
+        body: JSON.stringify({ systems })
+      });
+      state.config = result.config;
+      state.selectedId = moved.id;
+      resetDraft(getSelectedSystem());
+      setNotice('显示顺序已更新。', '');
+      renderAdmin();
+    } catch (error) {
+      setNotice('', error.message);
       renderAdmin();
     }
   }

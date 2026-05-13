@@ -80,8 +80,9 @@ test('public portal links to admin page and uses a compact five-column card wall
   assert.match(styles, /\.system-grid\s*{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(styles, /\.system-card-layout/);
   assert.match(styles, /\.system-card-layout\s*{[^}]*grid-template-columns:\s*1fr/s);
-  assert.match(styles, /\.system-card-media\s*{[^}]*min-height:\s*112px/s);
-  assert.match(styles, /\.hero-section\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.2fr\)\s+minmax\(280px,\s*0\.68fr\)/s);
+  assert.match(styles, /\.system-card-media\s*{[^}]*min-height:\s*78px/s);
+  assert.match(styles, /\.hero-section\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.25fr\)\s+minmax\(240px,\s*0\.58fr\)/s);
+  assert.match(styles, /\.portal-divider\s*{[^}]*height:\s*4px/s);
   assert.match(styles, /aspect-ratio:\s*16 \/ 9/);
 });
 
@@ -112,7 +113,7 @@ test('active system cards are whole-card links that open in a new tab', async ()
   assert.doesNotMatch(styles, /\.system-link/);
 });
 
-test('admin page exposes card configuration fields, upload control, delete-image action, centered save dialog, and aligned preview layout', async () => {
+test('admin page exposes card configuration fields, upload control, reorder actions, centered save dialog, and aligned preview layout', async () => {
   const html = await readFile('admin.html', 'utf8');
   const admin = await readFile('assets/admin.js', 'utf8');
   const styles = await readFile('assets/styles.css', 'utf8');
@@ -133,20 +134,27 @@ test('admin page exposes card configuration fields, upload control, delete-image
   assert.match(admin, /function deleteSystem/);
   assert.match(admin, /function uploadImage/);
   assert.match(admin, /function deleteImage/);
+  assert.match(admin, /function moveSystem/);
   assert.match(admin, /<select name="status"/);
   assert.match(admin, /data-close-dialog/);
   assert.match(admin, /class="admin-modal/);
   assert.doesNotMatch(admin, /window\.alert\(/);
+  assert.doesNotMatch(admin, /theme-chip/);
+  assert.match(admin, /data-move-up/);
+  assert.match(admin, /data-move-down/);
   assert.match(admin, /await api\('\/api\/upload',\s*{\s*method:\s*'DELETE'/s);
+  assert.match(admin, /await api\('\/api\/config',\s*{\s*method:\s*'PUT'/s);
   assert.match(admin, /state\.draft\s*=/);
   assert.match(admin, /system-card-content[\s\S]*system-card-media/s);
   assert.match(pythonServer, /path == '\/api\/upload' and self\.command == 'DELETE'/);
+  assert.match(pythonServer, /path == '\/api\/config' and self\.command == 'PUT'/);
   assert.match(pythonServer, /def decode_url_component/);
   assert.match(pythonServer, /system_id = decode_url_component\(match\.group\(1\)\)/);
   assert.match(styles, /\.admin-shell/);
   assert.match(styles, /\.admin-form/);
   assert.match(styles, /\.admin-upload/);
   assert.match(styles, /\.admin-modal/);
+  assert.match(styles, /\.admin-order-actions/);
 });
 
 test('portal separates hero and system catalog with a divider band', async () => {
@@ -266,6 +274,17 @@ test('admin backend requires login, validates payloads, and persists CRUD change
     const updated = savedAfterUpdate.systems.find((system) => system.id === created.system.id);
     assert.equal(updated.name, '测试系统更新');
     assert.deepEqual(updated.tags, ['更新', '后台']);
+
+    const reorderedSystems = savedAfterUpdate.systems.slice().reverse();
+    const reorder = await fetch(`${baseUrl}/api/config`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ systems: reorderedSystems })
+    });
+    assert.equal(reorder.status, 200);
+
+    const savedAfterReorder = JSON.parse(await readFile(join(tempRoot, 'assets/config.json'), 'utf8'));
+    assert.equal(savedAfterReorder.systems[0].id, reorderedSystems[0].id);
 
     const remove = await fetch(`${baseUrl}/api/systems/${created.system.id}`, {
       method: 'DELETE',

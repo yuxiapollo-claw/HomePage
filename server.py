@@ -303,6 +303,25 @@ class PortalHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 json_response(self, 200, read_config())
                 return
 
+            if path == '/api/config' and self.command == 'PUT':
+                if not require_auth(self):
+                    return
+                body = read_body(self)
+                config = read_config()
+                systems = body.get('systems')
+                if not isinstance(systems, list):
+                    json_response(self, 400, {'error': 'Systems array is required'})
+                    return
+                existing_ids = set(item.get('id') for item in config.get('systems', []))
+                next_ids = set(item.get('id') for item in systems)
+                if len(existing_ids) != len(next_ids) or any(system_id not in next_ids for system_id in existing_ids):
+                    json_response(self, 400, {'error': 'Systems payload must contain the same ids'})
+                    return
+                config['systems'] = systems
+                write_config(config)
+                json_response(self, 200, {'config': config})
+                return
+
             if path == '/api/upload' and self.command == 'POST':
                 if not require_auth(self):
                     return
