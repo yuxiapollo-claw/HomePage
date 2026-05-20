@@ -42,6 +42,13 @@
     return category ? category.name : '未分类';
   }
 
+  function getSystemHref(system) {
+    if (String(system.credentialProfile || '').trim()) {
+      return `/api/launch/${encodeURIComponent(system.id)}`;
+    }
+    return system.url || '#';
+  }
+
   function filterSystems() {
     const query = state.query.trim().toLowerCase();
     return state.config.systems.filter((system) => {
@@ -91,14 +98,15 @@
     return `
       <section class="system-grid" aria-label="系统入口列表">
         ${systems.map((system) => {
-          const disabled = system.url === '#';
+          const href = getSystemHref(system);
+          const disabled = href === '#';
           const tags = (system.tags || []).slice(0, 3);
           const hasImage = Boolean(system.image);
           const cardClass = hasImage ? 'system-card system-card-layout has-image' : 'system-card';
           const cardTag = disabled ? 'article' : 'a';
           const cardAttributes = disabled
             ? ''
-            : ` href="${escapeHtml(system.url)}" target="_blank" rel="noopener noreferrer"`;
+            : ` href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer"`;
           const imageMarkup = hasImage
             ? `<div class="system-card-media"><img class="system-card-image" src="${escapeHtml(system.image)}" alt="${escapeHtml(system.name)}系统图片" onerror="this.closest('.system-card-media')?.remove()"></div>`
             : '';

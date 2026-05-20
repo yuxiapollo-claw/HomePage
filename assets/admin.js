@@ -19,7 +19,11 @@
     image: '',
     tags: '',
     status: '待配置',
-    url: '#'
+    url: '#',
+    credentialProfile: '',
+    launchUsername: '',
+    launchPassword: '',
+    hasLaunchPassword: false
   };
 
   const iconOptions = [
@@ -86,7 +90,8 @@
     return {
       ...defaultSystem,
       ...source,
-      tags: Array.isArray(source.tags) ? source.tags.join(', ') : source.tags || ''
+      tags: Array.isArray(source.tags) ? source.tags.join(', ') : source.tags || '',
+      launchPassword: ''
     };
   }
 
@@ -298,6 +303,18 @@
             <span>访问地址</span>
             <input name="url" value="${escapeHtml(values.url)}" placeholder="https://... 或 #">
           </label>
+          <input type="hidden" name="credentialProfile" value="${escapeHtml(values.credentialProfile)}">
+          <div class="admin-form-grid">
+            <label>
+              <span>登录账号</span>
+              <input name="launchUsername" value="${escapeHtml(values.launchUsername)}" placeholder="不填写则普通跳转" autocomplete="off">
+            </label>
+            <label>
+              <span>登录密码</span>
+              <input name="launchPassword" type="password" value="${escapeHtml(values.launchPassword)}" placeholder="${values.hasLaunchPassword ? '已保存密码，不修改可留空' : '填写登录密码'}" autocomplete="new-password">
+            </label>
+          </div>
+          <span class="admin-upload-help">账号密码保存在服务器本地凭据文件，不写入公开入口配置。</span>
           <div class="admin-form-grid">
             <label>
               <span>状态</span>

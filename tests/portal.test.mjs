@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, mkdir, copyFile } from 'node:fs/promises';
+import http from 'node:http';
+import { gzipSync } from 'node:zlib';
+import { mkdtemp, readFile, rm, mkdir, copyFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -113,6 +115,112 @@ test('active system cards are whole-card links that open in a new tab', async ()
   assert.doesNotMatch(styles, /\.system-link/);
 });
 
+test('credential-profile cards route through the server-side launch endpoint', async () => {
+  const app = await readFile('assets/app.js', 'utf8');
+  const admin = await readFile('assets/admin.js', 'utf8');
+  const nodeServer = await readFile('server.js', 'utf8');
+  const pythonServer = await readFile('server.py', 'utf8');
+
+  assert.match(app, /function getSystemHref/);
+  assert.match(app, /\/api\/launch\/\$\{encodeURIComponent\(system\.id\)\}/);
+  assert.match(admin, /name="credentialProfile"/);
+  assert.match(admin, /name="launchUsername"/);
+  assert.match(admin, /name="launchPassword"/);
+  assert.match(nodeServer, /PORTAL_LAUNCH_CREDENTIALS_JSON/);
+  assert.match(nodeServer, /function writeLaunchCredentials/);
+  assert.match(nodeServer, /const launchMatch = url\.pathname\.match/);
+  assert.match(nodeServer, /api\\\/launch/);
+  assert.match(nodeServer, /decodeURIComponent\(cookies\[ROOT_PROXY_COOKIE\]\)/);
+  assert.match(pythonServer, /PORTAL_LAUNCH_CREDENTIALS_JSON/);
+  assert.match(pythonServer, /def write_launch_credentials/);
+  assert.match(pythonServer, /launch_match = re\.match/);
+  assert.match(pythonServer, /api\/launch/);
+});
+
+test('production python server includes generic login-page autofill proxy adapter', async () => {
+  const pythonServer = await readFile('server.py', 'utf8');
+
+  assert.match(pythonServer, /def render_autofill_launch_page/);
+  assert.match(pythonServer, /portalAutofill:/);
+  assert.match(pythonServer, /def autofill_script/);
+  assert.match(pythonServer, /def proxy_system_request/);
+  assert.match(pythonServer, /inject_autofill_script/);
+  assert.match(pythonServer, /def parse_proxy_request/);
+  assert.match(pythonServer, /parse_proxy_request\(self, path\)/);
+  assert.match(pythonServer, /ThreadingHTTPServer/);
+  assert.match(pythonServer, /render_autofill_launch_page\(system, profile\)/);
+  assert.match(pythonServer, /decode_url_component\(cookie\[ROOT_PROXY_COOKIE\]\.value\)/);
+  assert.match(pythonServer, /def gzip_decompress/);
+  assert.match(pythonServer, /gzip\.GzipFile/);
+  assert.match(pythonServer, /drop_content_encoding=should_rewrite/);
+  assert.match(pythonServer, /def proxy_error_response/);
+  assert.match(pythonServer, /Unable to open system/);
+  assert.match(pythonServer, /def proxy_request_value/);
+  assert.match(pythonServer, /PortalProxyRequest\(\s*proxy_request_value\(target_url\)/);
+  assert.doesNotMatch(pythonServer, /render_ledger_launch_page\(system, login_ledger\(system, profile\)\)/);
+});
+
+test('autofill script handles text inputs that represent password fields', async () => {
+  const nodeServer = await readFile('server.js', 'utf8');
+  const pythonServer = await readFile('server.py', 'utf8');
+
+  for (const source of [nodeServer, pythonServer]) {
+    assert.match(source, /passwordScore/);
+    assert.match(source, /pwd\|pass\|password/);
+    assert.ok(source.includes('\\\\u5bc6\\\\s*\\\\u7801'));
+    assert.match(source, /checkbox|radio|button|submit|reset/);
+    assert.match(source, /stableFillCount/);
+    assert.match(source, /attempts >= 120/);
+    assert.match(source, /passwordScore\([^)]*\) < 9/);
+    assert.match(source, /if \(element\.value === value\) return true/);
+    assert.match(source, /element\.dataset\.portalAutofillApplied === "1"/);
+    assert.match(source, /if \(usernameInput && credentials\.username\) usernameChanged = setValue/);
+    assert.match(source, /org\|company\|corp\|tenant/);
+    assert.match(source, /userScore\(input\) < 9/);
+    assert.match(source, /new Event\("blur"/);
+    assert.match(source, /credentials\.extraFields/);
+    assert.match(source, /fillExtraFields/);
+    assert.match(source, /selectOptionByValueOrText/);
+  }
+});
+
+test('proxy html rewriting handles unquoted root-relative asset attributes', async () => {
+  const nodeServer = await readFile('server.js', 'utf8');
+  const pythonServer = await readFile('server.py', 'utf8');
+
+  assert.match(nodeServer, /src\|href\|action/);
+  assert.match(nodeServer, /quote \|\| ''/);
+  assert.match(pythonServer, /src\|href\|action/);
+  assert.match(pythonServer, /\\b\(src\|href\|action\)=/);
+  assert.match(pythonServer, /quote = match\.group\(2\) or ''/);
+});
+
+test('native-path proxy mode preserves target pathname for route-sensitive systems', async () => {
+  const nodeServer = await readFile('server.js', 'utf8');
+  const pythonServer = await readFile('server.py', 'utf8');
+
+  for (const source of [nodeServer, pythonServer]) {
+    assert.match(source, /native-path/);
+    assert.match(source, /portal_root_proxy/);
+    assert.match(source, /parseRootProxyCookie|parse_root_proxy_cookie/);
+    assert.match(source, /filterProxyCookieHeader|filter_proxy_cookie_header/);
+    assert.match(source, /referer|Referer/);
+  }
+});
+
+test('proxy autofill adapter bridges LCAP login success into the default dashboard route', async () => {
+  const nodeServer = await readFile('server.js', 'utf8');
+  const pythonServer = await readFile('server.py', 'utf8');
+
+  for (const source of [nodeServer, pythonServer]) {
+    assert.match(source, /installLcapLoginBridge|install_lcap_login_bridge/);
+    assert.match(source, /lcplogics\/getDeptNameByUserName/);
+    assert.match(source, /window\.\$global\.userInfo/);
+    assert.match(source, /UserId/);
+    assert.match(source, /\/dashboard\/applicationCenter/);
+  }
+});
+
 test('admin page exposes card configuration fields, upload control, reorder actions, centered save dialog, and aligned preview layout', async () => {
   const html = await readFile('admin.html', 'utf8');
   const admin = await readFile('assets/admin.js', 'utf8');
@@ -189,6 +297,310 @@ test('project files do not contain deployment credentials', async () => {
   for (const file of checkedFiles) {
     const content = await readFile(file, 'utf8');
     assert.doesNotMatch(content, /icci1239|root\s*密码|password\s*[:=]/i, `${file} should not contain credentials`);
+  }
+});
+
+test('launch route renders an autofill proxy launcher from server-side credential profiles', async () => {
+  const { createServer } = await import('../server.js');
+  const tempRoot = await mkdtemp(join(tmpdir(), 'portal-launch-'));
+  await mkdir(join(tempRoot, 'assets'), { recursive: true });
+  const config = JSON.parse(await readFile('assets/config.json', 'utf8'));
+  config.systems = [
+    {
+      id: 'oa-test',
+      name: 'OA Test',
+      description: 'Launch test card',
+      category: 'common',
+      icon: 'layout-dashboard',
+      image: '',
+      tags: ['test'],
+      status: 'available',
+      url: '#',
+      credentialProfile: 'oa-test-profile'
+    },
+    {
+      id: 'plain-test',
+      name: 'Plain Test',
+      description: 'Plain redirect card',
+      category: 'common',
+      icon: 'layout-dashboard',
+      image: '',
+      tags: ['test'],
+      status: 'available',
+      url: 'https://example.test/app'
+    }
+  ];
+  await writeFile(join(tempRoot, 'assets/config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+  const app = createServer({
+    rootDir: tempRoot,
+    launchCredentials: {
+      'oa-test-profile': {
+        username: 'demo-user',
+        password: 'demo-pass',
+        loginUrl: 'https://example.test/login',
+        fields: {
+          username: 'user_code',
+          password: 'user_pass'
+        },
+        extraFields: {
+          tenant: 'qa'
+        }
+      }
+    }
+  });
+
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${app.address().port}`;
+
+  try {
+    const launch = await fetch(`${baseUrl}/api/launch/oa-test`);
+    assert.equal(launch.status, 200);
+    assert.match(launch.headers.get('content-type'), /text\/html/);
+    const html = await launch.text();
+    assert.match(html, /sessionStorage\.setItem\("portalAutofill:oa-test"/);
+    assert.match(html, /window\.location\.replace\('\/proxy\/oa-test\/login'\)/);
+    assert.match(html, /demo-user/);
+    assert.match(html, /demo-pass/);
+    assert.match(html, /extraFields/);
+    assert.match(html, /tenant/);
+    assert.doesNotMatch(html, /launch-form|user_code|user_pass/);
+
+    const savedConfig = await readFile(join(tempRoot, 'assets/config.json'), 'utf8');
+    assert.doesNotMatch(savedConfig, /demo-user|demo-pass/);
+
+    const redirect = await fetch(`${baseUrl}/api/launch/plain-test`, { redirect: 'manual' });
+    assert.equal(redirect.status, 302);
+    assert.equal(redirect.headers.get('location'), 'https://example.test/app');
+
+    const missingSystem = await fetch(`${baseUrl}/api/launch/unknown-system`);
+    assert.equal(missingSystem.status, 404);
+  } finally {
+    await new Promise((resolve) => app.close(resolve));
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('admin backend stores launch credentials outside the public config', async () => {
+  const { createServer } = await import('../server.js');
+  const tempRoot = await mkdtemp(join(tmpdir(), 'portal-launch-admin-'));
+  await mkdir(join(tempRoot, 'assets'), { recursive: true });
+  await copyFile('assets/config.json', join(tempRoot, 'assets/config.json'));
+  const launchCredentialsPath = join(tempRoot, 'secure', 'launch-credentials.json');
+
+  const app = createServer({
+    rootDir: tempRoot,
+    adminPassword: 'correct-password',
+    sessionSecret: 'test-session-secret',
+    launchCredentialsPath
+  });
+
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${app.address().port}`;
+
+  try {
+    const login = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'correct-password' })
+    });
+    const cookie = login.headers.get('set-cookie');
+
+    const create = await fetch(`${baseUrl}/api/systems`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({
+        name: 'Credential Launch System',
+        description: 'Stores launch credentials outside public config',
+        category: 'common',
+        icon: 'database',
+        image: '',
+        tags: ['launch'],
+        status: 'available',
+        url: 'https://example.test/login',
+        launchUsername: 'launch-user',
+        launchPassword: 'launch-secret'
+      })
+    });
+    assert.equal(create.status, 201);
+    const created = await create.json();
+    assert.ok(created.system.credentialProfile);
+    assert.equal(created.system.launchUsername, 'launch-user');
+    assert.equal(created.system.launchPassword, undefined);
+    assert.equal(created.system.hasLaunchPassword, true);
+
+    const publicConfig = await readFile(join(tempRoot, 'assets/config.json'), 'utf8');
+    assert.match(publicConfig, /credentialProfile/);
+    assert.doesNotMatch(publicConfig, /launch-user|launch-secret/);
+
+    const credentials = JSON.parse(await readFile(launchCredentialsPath, 'utf8'));
+    const profile = credentials[created.system.credentialProfile];
+    assert.equal(profile.username, 'launch-user');
+    assert.equal(profile.password, 'launch-secret');
+    assert.deepEqual(profile.fields, { username: 'username', password: 'password' });
+
+    const adminConfigResponse = await fetch(`${baseUrl}/api/config`, { headers: { cookie } });
+    const adminConfig = await adminConfigResponse.json();
+    const adminSystem = adminConfig.systems.find((system) => system.id === created.system.id);
+    assert.equal(adminSystem.launchUsername, 'launch-user');
+    assert.equal(adminSystem.launchPassword, undefined);
+    assert.equal(adminSystem.hasLaunchPassword, true);
+
+    const launch = await fetch(`${baseUrl}/api/launch/${created.system.id}`);
+    const html = await launch.text();
+    assert.match(html, /sessionStorage\.setItem\("portalAutofill:credential-launch-system"/);
+    assert.match(html, /window\.location\.replace\('\/proxy\/credential-launch-system\/login'\)/);
+    assert.match(html, /launch-user/);
+    assert.match(html, /launch-secret/);
+  } finally {
+    await new Promise((resolve) => app.close(resolve));
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('credential launch opens the proxied login page and autofills saved credentials without submitting', async () => {
+  const { createServer } = await import('../server.js');
+  const tempRoot = await mkdtemp(join(tmpdir(), 'portal-autofill-launch-'));
+  await mkdir(join(tempRoot, 'assets'), { recursive: true });
+  const config = JSON.parse(await readFile('assets/config.json', 'utf8'));
+  let loginRequests = 0;
+
+  const target = http.createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/login.html') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end('<!doctype html><html><body><form><input name="username"><input type="password" name="password"></form><script src="/assets/js/app.js"></script></body></html>');
+      return;
+    }
+    if (request.method === 'GET' && request.url === '/compressed-login.html') {
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-encoding': 'gzip'
+      });
+      response.end(gzipSync('<!doctype html><html><body><form><input name="username"><input type="password" name="password"></form></body></html>'));
+      return;
+    }
+    if (request.method === 'GET' && request.url === '/assets/js/app.js') {
+      response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+      response.end('window.__TARGET_APP__ = true;');
+      return;
+    }
+    if (request.method === 'GET' && request.url === '/static/js/app.js') {
+      response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+      response.end('window.__TARGET_ROOT_APP__ = true;');
+      return;
+    }
+    if (request.method === 'GET' && request.url === '/compressed.cssgz') {
+      if (request.headers.referer !== `${targetOrigin}/`) {
+        response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+        response.end('missing target referer');
+        return;
+      }
+      response.writeHead(200, {
+        'content-type': 'text/css',
+        'content-encoding': 'gzip'
+      });
+      response.end(gzipSync('body { color: #123456; }'));
+      return;
+    }
+    if (request.method === 'GET' && request.url === '/status-as-html') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end('{"ok":true,"message":"json response mislabeled as html"}');
+      return;
+    }
+    if (request.method === 'POST' && request.url === '/login') {
+      loginRequests += 1;
+      response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ code: 500, msg: 'launch should not submit login' }));
+      return;
+    }
+    response.writeHead(404, { 'content-type': 'text/plain' });
+    response.end('not found');
+  });
+  await new Promise((resolve) => target.listen(0, '127.0.0.1', resolve));
+  const targetOrigin = `http://127.0.0.1:${target.address().port}`;
+
+  config.systems = [{
+    id: 'generic',
+    name: 'Generic',
+    description: 'Generic login app',
+    category: 'common',
+    icon: 'database',
+    image: '',
+    tags: ['generic'],
+    status: 'available',
+    url: `${targetOrigin}/login.html`,
+    credentialProfile: 'generic-profile'
+  }];
+  await writeFile(join(tempRoot, 'assets/config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+  const app = createServer({
+    rootDir: tempRoot,
+    launchCredentials: {
+      'generic-profile': {
+        username: 'launch-user',
+        password: 'launch-secret',
+        loginUrl: `${targetOrigin}/login.html`,
+        fields: { username: 'username', password: 'password' },
+        extraFields: { company: '中国医学科学院医学生物学研究所' }
+      }
+    }
+  });
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${app.address().port}`;
+
+  try {
+    const launch = await fetch(`${baseUrl}/api/launch/generic`);
+    assert.equal(launch.status, 200);
+    const html = await launch.text();
+    assert.match(html, /sessionStorage\.setItem\("portalAutofill:generic"/);
+    assert.match(html, /window\.location\.replace\('\/proxy\/generic\/login\.html'\)/);
+    assert.match(html, /launch-user/);
+    assert.match(html, /launch-secret/);
+    assert.match(html, /extraFields/);
+    assert.match(html, /中国医学科学院医学生物学研究所/);
+    assert.doesNotMatch(html, /localStorage\["authToken"\]\s*=|doLogin/);
+    assert.equal(loginRequests, 0);
+
+    const proxyRoot = await fetch(`${baseUrl}/proxy/generic/login.html`);
+    assert.equal(proxyRoot.status, 200);
+    assert.equal(proxyRoot.headers.get('cache-control'), 'no-store');
+    const proxyHtml = await proxyRoot.text();
+    assert.match(proxyHtml, /<form>/);
+    assert.match(proxyHtml, /portalFillLogin/);
+    assert.match(proxyHtml, /sessionStorage\.getItem\(storageKey\)/);
+    assert.match(proxyHtml, /const storageKey = "portalAutofill:generic"/);
+    assert.doesNotMatch(proxyHtml, /launch-secret/);
+
+    const proxyAsset = await fetch(`${baseUrl}/proxy/generic/assets/js/app.js`);
+    assert.equal(proxyAsset.status, 200);
+    assert.match(await proxyAsset.text(), /__TARGET_APP__/);
+
+    const proxyRootAsset = await fetch(`${baseUrl}/static/js/app.js`, {
+      headers: { referer: `${baseUrl}/proxy/generic/login.html` }
+    });
+    assert.equal(proxyRootAsset.status, 200);
+    assert.match(await proxyRootAsset.text(), /__TARGET_ROOT_APP__/);
+
+    const mislabeledJson = await fetch(`${baseUrl}/proxy/generic/status-as-html`);
+    assert.equal(mislabeledJson.status, 200);
+    const mislabeledJsonText = await mislabeledJson.text();
+    assert.equal(mislabeledJsonText, '{"ok":true,"message":"json response mislabeled as html"}');
+    assert.doesNotMatch(mislabeledJsonText, /portalFillLogin/);
+
+    const compressedCss = await fetch(`${baseUrl}/proxy/generic/compressed.cssgz`);
+    assert.equal(compressedCss.status, 200);
+    assert.equal(await compressedCss.text(), 'body { color: #123456; }');
+
+    const compressedLogin = await fetch(`${baseUrl}/proxy/generic/compressed-login.html`);
+    assert.equal(compressedLogin.status, 200);
+    assert.equal(compressedLogin.headers.get('content-encoding'), null);
+    const compressedLoginHtml = await compressedLogin.text();
+    assert.match(compressedLoginHtml, /<form>/);
+    assert.match(compressedLoginHtml, /portalFillLogin/);
+  } finally {
+    await new Promise((resolve) => app.close(resolve));
+    await new Promise((resolve) => target.close(resolve));
+    await rm(tempRoot, { recursive: true, force: true });
   }
 });
 

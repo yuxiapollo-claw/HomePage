@@ -43,6 +43,7 @@ The admin password must be configured outside the repository with the `ADMIN_PAS
 - `POST /api/systems` creates a system-entry card.
 - `PUT /api/systems/:id` updates a system-entry card.
 - `DELETE /api/systems/:id` deletes a system-entry card.
+- `GET /api/launch/:id` opens a system entry. If the card has a credential profile, the server renders an auto-submitting login form from server-side credentials.
 
 ## Systemd Service
 
@@ -91,9 +92,38 @@ Use `/admin.html` after logging in. Changes are written to `assets/config.json` 
 
 The public portal reads `assets/config.json`, so a browser refresh shows saved changes.
 
+## Test Credential Launch
+
+For a card that needs test auto-login, enter the login username and login password in the admin page. The admin API writes them to a protected server-side credentials file and stores only a non-secret credential profile name in `assets/config.json`.
+
+Store the real launch credential mapping on the Linux server only. The default file path is `/etc/service-portal/launch-credentials.json`, or you can point to another file with `PORTAL_LAUNCH_CREDENTIALS_FILE`.
+
+Example shape:
+
+```json
+{
+  "oa-test-profile": {
+    "username": "test-user",
+    "password": "test-password",
+    "method": "POST",
+    "loginUrl": "https://example.test/login",
+    "fields": {
+      "username": "username",
+      "password": "password"
+    },
+    "extraFields": {
+      "remember": "false"
+    }
+  }
+}
+```
+
+The target system must accept a normal HTML form POST. Systems with captcha, SSO, CSRF tokens, dynamic JavaScript login, or encrypted password submission need a separate adapter.
+
 ## Operational Notes
 
 - Keep `ADMIN_PASSWORD` only in the server environment or a protected systemd environment file.
+- Keep launch usernames and passwords only in `/etc/service-portal/launch-credentials.json` or another protected server-side file.
 - Keep `assets/config.json` valid JSON.
 - Admin sessions are stored in memory; restarting the service logs administrators out.
 - The image field accepts an existing relative asset path such as `assets/logo.jpg` or an HTTP/HTTPS image URL.
