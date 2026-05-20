@@ -1462,7 +1462,8 @@ async function serveStatic(rootDir, requestPath, response) {
   }
 
   response.writeHead(200, {
-    'content-type': contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream'
+    'content-type': contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
+    'cache-control': 'no-store'
   });
   createReadStream(filePath).pipe(response);
 }

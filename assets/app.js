@@ -4,7 +4,8 @@
   const state = {
     config: null,
     activeCategory: 'all',
-    query: ''
+    query: '',
+    credentialCache: new Map()
   };
 
   const iconMap = {
@@ -58,17 +59,8 @@
     return state.config.systems.find((system) => system.id === systemId) || null;
   }
 
-  async function copyTextToClipboard(value) {
+  function copyTextWithExecCommand(value) {
     const text = String(value || '');
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-      try {
-        await navigator.clipboard.writeText(text);
-        return;
-      } catch (error) {
-        // Fall back for internal HTTP deployments where Clipboard API can be blocked.
-      }
-    }
-
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.setAttribute('readonly', 'readonly');
@@ -82,6 +74,19 @@
     textarea.remove();
     if (!copied) {
       throw new Error('Clipboard copy failed');
+    }
+  }
+
+  async function copyTextToClipboard(value) {
+    try {
+      copyTextWithExecCommand(value);
+      return;
+    } catch (fallbackError) {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(String(value || ''));
+        return;
+      }
+      throw fallbackError;
     }
   }
 
@@ -113,6 +118,24 @@
       toast.classList.add('is-hiding');
       window.setTimeout(() => toast.remove(), 220);
     }, 2400);
+  }
+
+  async function preloadLaunchPasswords() {
+    const systems = state.config?.systems || [];
+    await Promise.all(systems
+      .filter((system) => system.hasLaunchPassword)
+      .map(async (system) => {
+        try {
+          const response = await fetch(`/api/credential-copy/${encodeURIComponent(system.id)}/password`, {
+            cache: 'no-store'
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const payload = await response.json();
+          state.credentialCache.set(system.id, String(payload.value || ''));
+        } catch (error) {
+          state.credentialCache.delete(system.id);
+        }
+      }));
   }
 
   function renderCategories() {
@@ -158,7 +181,7 @@
           const linkOverlay = disabled
             ? ''
             : directLaunch
-              ? `<button class="system-card-link" type="button" data-direct-launch-system-id="${escapeHtml(system.id)}" aria-label="${'\u6253\u5f00'}${escapeHtml(system.name)}${'\u5e76\u590d\u5236\u5bc6\u7801'}"></button>`
+              ? `<a class="system-card-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" data-direct-launch-system-id="${escapeHtml(system.id)}" aria-label="${'\u6253\u5f00'}${escapeHtml(system.name)}${'\u5e76\u590d\u5236\u5bc6\u7801'}"></a>`
               : `<a class="system-card-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="${'\u6253\u5f00'}${escapeHtml(system.name)}"></a>`;
           const imageMarkup = hasImage
             ? `<div class="system-card-media"><img class="system-card-image" src="${escapeHtml(system.image)}" alt="${escapeHtml(system.name)}系统图片" onerror="this.closest('.system-card-media')?.remove()"></div>`
@@ -313,8 +336,7 @@
 
     document.querySelectorAll('[data-direct-launch-system-id]').forEach((button) => {
       button.addEventListener('click', (event) => {
-        event.preventDefault();
-        launchSystemWithCopiedPassword(button.dataset.directLaunchSystemId, button);
+        openDirectLaunchCard(event, button);
       });
     });
 
@@ -327,25 +349,35 @@
     });
   }
 
-  async function launchSystemWithCopiedPassword(systemId, button) {
-    const system = findSystem(systemId);
+  function openDirectLaunchCard(event, link) {
+    event.preventDefault();
+    const system = findSystem(link.dataset.directLaunchSystemId);
     if (!system) return;
-    const href = getSystemHref(system);
-    const launchWindow = window.open(href, '_blank', 'noopener,noreferrer');
-    const copyPromise = system.hasLaunchPassword
-      ? copyCredential(system.id, 'password', button, { successText: '\u5bc6\u7801\u5df2\u590d\u5236' })
-      : Promise.resolve(false);
+    copyCachedLaunchPassword(system.id, link);
+    openSystemInNewPage(link.href || getSystemHref(system));
+  }
 
-    const copied = await copyPromise;
-    if (!launchWindow) {
-      window.location.href = href;
+  function openSystemInNewPage(href) {
+    window.open(href, '_blank');
+  }
+
+  function copyCachedLaunchPassword(systemId, link) {
+    const system = findSystem(systemId);
+    if (!system?.hasLaunchPassword) return false;
+    const cachedSecret = state.credentialCache.get(system.id);
+    if (!cachedSecret) {
+      showToast('\u5bc6\u7801\u672a\u5c31\u7eea\uff0c\u8bf7\u8fd4\u56de\u540e\u518d\u70b9\u51fb\u4e00\u6b21', 'error');
+      return false;
     }
-    if (copied) {
+
+    try {
+      copyTextWithExecCommand(cachedSecret);
       showToast('\u5bc6\u7801\u5df2\u590d\u5236\uff0c\u5df2\u6253\u5f00\u7cfb\u7edf');
-    } else if (system.hasLaunchPassword) {
+      return true;
+    } catch (error) {
+      link?.focus();
       showToast('\u5bc6\u7801\u590d\u5236\u5931\u8d25\uff0c\u5df2\u6253\u5f00\u7cfb\u7edf', 'error');
-    } else {
-      showToast('\u672a\u914d\u7f6e\u5bc6\u7801\uff0c\u5df2\u6253\u5f00\u7cfb\u7edf');
+      return false;
     }
   }
 
@@ -405,6 +437,7 @@
         throw new Error(`HTTP ${response.status}`);
       }
       state.config = await response.json();
+      await preloadLaunchPasswords();
       renderPortal();
     } catch (error) {
       renderError(error);

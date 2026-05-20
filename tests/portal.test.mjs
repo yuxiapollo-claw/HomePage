@@ -140,12 +140,21 @@ test('credential-profile cards copy the password and open systems directly witho
   assert.doesNotMatch(app, /login-helper-panel/);
   assert.doesNotMatch(styles, /login-helper/);
   assert.match(app, /data-direct-launch-system-id/);
-  assert.match(app, /function launchSystemWithCopiedPassword/);
-  assert.match(app, /window\.open\(href,\s*'_blank',\s*'noopener,noreferrer'\)/);
-  assert.doesNotMatch(app, /launchWindow\.location\.href = getSystemHref\(system\)/);
-  assert.match(app, /window\.location\.href = href/);
-  assert.match(app, /const copied = await copyPromise[\s\S]*window\.location\.href = href/);
-  assert.match(app, /copyCredential\(system\.id,\s*'password'/);
+  assert.match(app, /target="_blank"/);
+  assert.match(app, /rel="noopener noreferrer"/);
+  assert.match(app, /function preloadLaunchPasswords/);
+  assert.match(app, /credentialCache:\s*new Map\(\)/);
+  assert.match(app, /function openDirectLaunchCard/);
+  assert.match(app, /function openSystemInNewPage/);
+  assert.match(app, /event\.preventDefault\(\)/);
+  assert.match(app, /window\.open\(href,\s*'_blank'\)/);
+  assert.match(app, /copyCachedLaunchPassword/);
+  assert.match(app, /function copyTextWithExecCommand/);
+  assert.match(app, /copyTextWithExecCommand\(cachedSecret\)/);
+  assert.match(app, /await preloadLaunchPasswords\(\);\s*renderPortal\(\);/);
+  assert.doesNotMatch(app, /function launchSystemWithCopiedPassword/);
+  assert.doesNotMatch(app, /window\.open\(href,\s*'_blank',\s*'noopener,noreferrer'\)/);
+  assert.doesNotMatch(app, /window\.location\.href = href/);
   assert.match(app, /portal-toast/);
   assert.match(app, /data-copy-credential/);
   assert.match(app, /\/api\/credential-copy\/\$\{encodeURIComponent\(systemId\)\}/);
@@ -417,6 +426,16 @@ test('launch route renders an autofill proxy launcher from server-side credentia
     await new Promise((resolve) => app.close(resolve));
     await rm(tempRoot, { recursive: true, force: true });
   }
+});
+
+test('static app assets are served without browser caching', async () => {
+  const nodeServer = await readFile('server.js', 'utf8');
+  const pythonServer = await readFile('server.py', 'utf8');
+
+  assert.match(nodeServer, /async function serveStatic/);
+  assert.match(nodeServer, /'cache-control': 'no-store'/);
+  assert.match(pythonServer, /def serve_static/);
+  assert.match(pythonServer, /self\.send_header\('Cache-Control', 'no-store'\)/);
 });
 
 test('admin backend stores launch credentials outside the public config', async () => {
