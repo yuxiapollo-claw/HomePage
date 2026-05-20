@@ -121,7 +121,7 @@ test('active system cards are whole-card links that open in a new tab', async ()
   assert.doesNotMatch(styles, /\.system-link/);
 });
 
-test('credential-profile cards can open original systems and expose copy controls', async () => {
+test('credential-profile cards open a login helper with copy and launch controls', async () => {
   const app = await readFile('assets/app.js', 'utf8');
   const admin = await readFile('assets/admin.js', 'utf8');
   const nodeServer = await readFile('server.js', 'utf8');
@@ -129,7 +129,13 @@ test('credential-profile cards can open original systems and expose copy control
 
   assert.match(app, /function getSystemHref/);
   assert.match(app, /system\.launchHref \|\| system\.url/);
-  assert.match(app, /function renderCredentialActions/);
+  assert.match(app, /function renderLoginHelper/);
+  assert.match(app, /function renderHelperDock/);
+  assert.match(app, /data-login-helper-system-id/);
+  assert.match(app, /data-copy-and-open/);
+  assert.match(app, /data-open-system/);
+  assert.match(app, /window\.open\('', '_blank'\)/);
+  assert.match(app, /launchWindow\.location\.href = getSystemHref\(system\)/);
   assert.match(app, /data-copy-credential/);
   assert.match(app, /\/api\/credential-copy\/\$\{encodeURIComponent\(systemId\)\}/);
   assert.match(app, /function copyTextToClipboard/);

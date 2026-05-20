@@ -4,7 +4,9 @@
   const state = {
     config: null,
     activeCategory: 'all',
-    query: ''
+    query: '',
+    helperSystemId: '',
+    helperOpen: false
   };
 
   const iconMap = {
@@ -49,23 +51,92 @@
     return system.launchHref || system.url || '#';
   }
 
-  function renderCredentialActions(system) {
-    if (!system.hasLaunchUsername && !system.hasLaunchPassword) return '';
+  function hasCredentials(system) {
+    return Boolean(system.hasLaunchUsername || system.hasLaunchPassword);
+  }
+
+  function findSystem(systemId) {
+    if (!state.config) return null;
+    return state.config.systems.find((system) => system.id === systemId) || null;
+  }
+
+  function renderLoginHelper() {
+    const system = state.helperOpen ? findSystem(state.helperSystemId) : null;
+    if (!system) return '';
+    const href = getSystemHref(system);
+    const helperTitle = escapeHtml(system.name);
+    const helperUrl = escapeHtml(href);
+
     return `
-      <div class="credential-actions" aria-label="${escapeHtml(system.name)}凭据复制">
+      <div class="login-helper-backdrop" data-close-login-helper></div>
+      <section class="login-helper-panel" role="dialog" aria-modal="true" aria-label="${helperTitle} 登录助手">
+        <div class="login-helper-header">
+          <div>
+            <span class="eyebrow">Login helper</span>
+            <h2>${helperTitle}</h2>
+            <p>${helperUrl}</p>
+          </div>
+          <button class="login-helper-close" type="button" data-close-login-helper aria-label="关闭登录助手">×</button>
+        </div>
+        <div class="login-helper-fields">
+          ${system.hasLaunchUsername ? `
+            <div class="login-helper-field">
+              <span>账号</span>
+              <strong>已配置</strong>
+              <button class="button button-secondary" type="button" data-copy-credential="username" data-system-id="${escapeHtml(system.id)}">
+                ${iconSvg('clipboard')}
+                <span>复制账号</span>
+              </button>
+            </div>
+          ` : ''}
+          ${system.hasLaunchPassword ? `
+            <div class="login-helper-field">
+              <span>密码</span>
+              <strong class="password-mask">••••••••</strong>
+              <button class="button button-secondary" type="button" data-copy-credential="password" data-system-id="${escapeHtml(system.id)}">
+                ${iconSvg('clipboard')}
+                <span>复制密码</span>
+              </button>
+            </div>
+          ` : ''}
+        </div>
+        <div class="login-helper-actions">
+          ${system.hasLaunchUsername ? `
+            <button class="button button-primary" type="button" data-copy-and-open data-system-id="${escapeHtml(system.id)}">
+              ${iconSvg('clipboard')}
+              <span>复制账号并打开系统</span>
+            </button>
+          ` : ''}
+          <a class="button button-secondary" href="${helperUrl}" target="_blank" rel="noopener noreferrer" data-open-system>
+            打开系统
+          </a>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderHelperDock() {
+    const system = state.helperSystemId ? findSystem(state.helperSystemId) : null;
+    if (!system || !hasCredentials(system)) return '';
+    return `
+      <aside class="login-helper-dock" aria-label="当前登录助手">
+        <div>
+          <span>当前登录助手</span>
+          <strong>${escapeHtml(system.name)}</strong>
+        </div>
         ${system.hasLaunchUsername ? `
-          <button class="credential-copy" type="button" data-copy-credential="username" data-system-id="${escapeHtml(system.id)}">
+          <button class="button button-secondary" type="button" data-copy-credential="username" data-system-id="${escapeHtml(system.id)}">
             ${iconSvg('clipboard')}
-            <span>复制账号</span>
+            <span>账号</span>
           </button>
         ` : ''}
         ${system.hasLaunchPassword ? `
-          <button class="credential-copy" type="button" data-copy-credential="password" data-system-id="${escapeHtml(system.id)}">
+          <button class="button button-secondary" type="button" data-copy-credential="password" data-system-id="${escapeHtml(system.id)}">
             ${iconSvg('clipboard')}
-            <span>复制密码</span>
+            <span>密码</span>
           </button>
         ` : ''}
-      </div>
+      </aside>
     `;
   }
 
@@ -150,13 +221,15 @@
           const tags = (system.tags || []).slice(0, 3);
           const hasImage = Boolean(system.image);
           const cardClass = hasImage ? 'system-card system-card-layout has-image' : 'system-card';
+          const opensHelper = !disabled && hasCredentials(system);
           const linkOverlay = disabled
             ? ''
-            : `<a class="system-card-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="打开${escapeHtml(system.name)}"></a>`;
+            : opensHelper
+              ? `<button class="system-card-link" type="button" data-login-helper-system-id="${escapeHtml(system.id)}" aria-label="打开${escapeHtml(system.name)}登录助手"></button>`
+              : `<a class="system-card-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="打开${escapeHtml(system.name)}"></a>`;
           const imageMarkup = hasImage
             ? `<div class="system-card-media"><img class="system-card-image" src="${escapeHtml(system.image)}" alt="${escapeHtml(system.name)}系统图片" onerror="this.closest('.system-card-media')?.remove()"></div>`
             : '';
-          const credentialActions = renderCredentialActions(system);
 
           return `
             <article class="${cardClass} ${disabled ? 'is-placeholder' : 'is-link-card'}">
@@ -174,7 +247,6 @@
                 <div class="tag-row">
                   ${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}
                 </div>
-                ${credentialActions}
               </div>
               ${imageMarkup}
             </article>
@@ -271,6 +343,8 @@
         </div>
         <a href="#portal-root">返回顶部</a>
       </footer>
+      ${renderHelperDock()}
+      ${renderLoginHelper()}
     `;
 
     bindEvents();
@@ -306,37 +380,79 @@
       });
     });
 
+    document.querySelectorAll('[data-login-helper-system-id]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        state.helperSystemId = button.dataset.loginHelperSystemId;
+        state.helperOpen = true;
+        renderPortal();
+      });
+    });
+
+    document.querySelectorAll('[data-close-login-helper]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.helperOpen = false;
+        renderPortal();
+      });
+    });
+
+    document.querySelectorAll('[data-open-system]').forEach((link) => {
+      link.addEventListener('click', () => {
+        state.helperOpen = false;
+        window.setTimeout(renderPortal, 120);
+      });
+    });
+
+    document.querySelectorAll('[data-copy-and-open]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const system = findSystem(button.dataset.systemId);
+        if (!system) return;
+        const launchWindow = window.open('', '_blank');
+        await copyCredential(system.id, 'username', button);
+        if (launchWindow) {
+          launchWindow.opener = null;
+          launchWindow.location.href = getSystemHref(system);
+        } else {
+          window.open(getSystemHref(system), '_blank', 'noopener,noreferrer');
+        }
+        state.helperOpen = false;
+        renderPortal();
+      });
+    });
+
     document.querySelectorAll('[data-copy-credential]').forEach((button) => {
       button.addEventListener('click', async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const field = button.dataset.copyCredential;
-        const systemId = button.dataset.systemId;
-        const originalLabel = button.querySelector('span')?.textContent || '';
-        button.disabled = true;
-        try {
-          const response = await fetch(`/api/credential-copy/${encodeURIComponent(systemId)}/${encodeURIComponent(field)}`, {
-            cache: 'no-store'
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const payload = await response.json();
-          await copyTextToClipboard(payload.value || '');
-          const label = button.querySelector('span');
-          if (label) label.textContent = '已复制';
-          window.setTimeout(() => {
-            if (label) label.textContent = originalLabel;
-          }, 1600);
-        } catch (error) {
-          const label = button.querySelector('span');
-          if (label) label.textContent = '复制失败';
-          window.setTimeout(() => {
-            if (label) label.textContent = originalLabel;
-          }, 1800);
-        } finally {
-          button.disabled = false;
-        }
+        await copyCredential(button.dataset.systemId, button.dataset.copyCredential, button);
       });
     });
+  }
+
+  async function copyCredential(systemId, field, button) {
+    const originalLabel = button.querySelector('span')?.textContent || button.textContent || '';
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/credential-copy/${encodeURIComponent(systemId)}/${encodeURIComponent(field)}`, {
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      await copyTextToClipboard(payload.value || '');
+      const label = button.querySelector('span');
+      if (label) label.textContent = '已复制';
+      window.setTimeout(() => {
+        if (label) label.textContent = originalLabel;
+      }, 1600);
+    } catch (error) {
+      const label = button.querySelector('span');
+      if (label) label.textContent = '复制失败';
+      window.setTimeout(() => {
+        if (label) label.textContent = originalLabel;
+      }, 1800);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   function updateResults() {
