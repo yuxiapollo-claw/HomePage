@@ -115,6 +115,9 @@ test('active system cards are whole-card links that open in a new tab', async ()
   assert.match(app, /onerror="this\.closest\('\.system-card-media'\)\?\.remove\(\)"/);
   assert.match(styles, /\.system-card-link\s*{/);
   assert.match(styles, /position:\s*absolute/);
+  assert.match(styles, /\.system-card-link\s*{[^}]*z-index:\s*2/s);
+  assert.doesNotMatch(styles, /\.system-card-content\s*{[^}]*z-index/s);
+  assert.match(styles, /\.credential-actions\s*{[^}]*z-index:\s*3/s);
   assert.doesNotMatch(styles, /\.system-link/);
 });
 
@@ -129,7 +132,9 @@ test('credential-profile cards can open original systems and expose copy control
   assert.match(app, /function renderCredentialActions/);
   assert.match(app, /data-copy-credential/);
   assert.match(app, /\/api\/credential-copy\/\$\{encodeURIComponent\(systemId\)\}/);
+  assert.match(app, /function copyTextToClipboard/);
   assert.match(app, /navigator\.clipboard\.writeText/);
+  assert.match(app, /document\.execCommand\('copy'\)/);
   assert.match(app, /api\/public-config/);
   assert.match(admin, /name="credentialProfile"/);
   assert.match(admin, /name="launchUsername"/);

@@ -69,6 +69,33 @@
     `;
   }
 
+  async function copyTextToClipboard(value) {
+    const text = String(value || '');
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch (error) {
+        // Fall back for internal HTTP deployments where Clipboard API can be blocked.
+      }
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const copied = document.execCommand('copy');
+    textarea.remove();
+    if (!copied) {
+      throw new Error('Clipboard copy failed');
+    }
+  }
+
   function filterSystems() {
     const query = state.query.trim().toLowerCase();
     return state.config.systems.filter((system) => {
@@ -293,7 +320,7 @@
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const payload = await response.json();
-          await navigator.clipboard.writeText(payload.value || '');
+          await copyTextToClipboard(payload.value || '');
           const label = button.querySelector('span');
           if (label) label.textContent = '已复制';
           window.setTimeout(() => {
