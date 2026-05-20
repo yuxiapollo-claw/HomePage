@@ -121,21 +121,32 @@ test('active system cards are whole-card links that open in a new tab', async ()
   assert.doesNotMatch(styles, /\.system-link/);
 });
 
-test('credential-profile cards open a login helper with copy and launch controls', async () => {
+test('credential-profile cards copy the password and open systems directly without a helper modal', async () => {
   const app = await readFile('assets/app.js', 'utf8');
+  const styles = await readFile('assets/styles.css', 'utf8');
   const admin = await readFile('assets/admin.js', 'utf8');
   const nodeServer = await readFile('server.js', 'utf8');
   const pythonServer = await readFile('server.py', 'utf8');
 
   assert.match(app, /function getSystemHref/);
   assert.match(app, /system\.launchHref \|\| system\.url/);
-  assert.match(app, /function renderLoginHelper/);
-  assert.match(app, /function renderHelperDock/);
-  assert.match(app, /data-login-helper-system-id/);
-  assert.match(app, /data-copy-and-open/);
-  assert.match(app, /data-open-system/);
-  assert.match(app, /window\.open\('', '_blank'\)/);
-  assert.match(app, /launchWindow\.location\.href = getSystemHref\(system\)/);
+  assert.doesNotMatch(app, /function renderLoginHelper/);
+  assert.doesNotMatch(app, /function renderHelperDock/);
+  assert.doesNotMatch(app, /helperSystemId/);
+  assert.doesNotMatch(app, /helperOpen/);
+  assert.doesNotMatch(app, /data-login-helper-system-id/);
+  assert.doesNotMatch(app, /data-copy-and-open/);
+  assert.doesNotMatch(app, /data-open-system/);
+  assert.doesNotMatch(app, /login-helper-panel/);
+  assert.doesNotMatch(styles, /login-helper/);
+  assert.match(app, /data-direct-launch-system-id/);
+  assert.match(app, /function launchSystemWithCopiedPassword/);
+  assert.match(app, /window\.open\(href,\s*'_blank',\s*'noopener,noreferrer'\)/);
+  assert.doesNotMatch(app, /launchWindow\.location\.href = getSystemHref\(system\)/);
+  assert.match(app, /window\.location\.href = href/);
+  assert.match(app, /const copied = await copyPromise[\s\S]*window\.location\.href = href/);
+  assert.match(app, /copyCredential\(system\.id,\s*'password'/);
+  assert.match(app, /portal-toast/);
   assert.match(app, /data-copy-credential/);
   assert.match(app, /\/api\/credential-copy\/\$\{encodeURIComponent\(systemId\)\}/);
   assert.match(app, /function copyTextToClipboard/);

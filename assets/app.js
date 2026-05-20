@@ -4,9 +4,7 @@
   const state = {
     config: null,
     activeCategory: 'all',
-    query: '',
-    helperSystemId: '',
-    helperOpen: false
+    query: ''
   };
 
   const iconMap = {
@@ -60,86 +58,6 @@
     return state.config.systems.find((system) => system.id === systemId) || null;
   }
 
-  function renderLoginHelper() {
-    const system = state.helperOpen ? findSystem(state.helperSystemId) : null;
-    if (!system) return '';
-    const href = getSystemHref(system);
-    const helperTitle = escapeHtml(system.name);
-    const helperUrl = escapeHtml(href);
-
-    return `
-      <div class="login-helper-backdrop" data-close-login-helper></div>
-      <section class="login-helper-panel" role="dialog" aria-modal="true" aria-label="${helperTitle} 登录助手">
-        <div class="login-helper-header">
-          <div>
-            <span class="eyebrow">Login helper</span>
-            <h2>${helperTitle}</h2>
-            <p>${helperUrl}</p>
-          </div>
-          <button class="login-helper-close" type="button" data-close-login-helper aria-label="关闭登录助手">×</button>
-        </div>
-        <div class="login-helper-fields">
-          ${system.hasLaunchUsername ? `
-            <div class="login-helper-field">
-              <span>账号</span>
-              <strong>已配置</strong>
-              <button class="button button-secondary" type="button" data-copy-credential="username" data-system-id="${escapeHtml(system.id)}">
-                ${iconSvg('clipboard')}
-                <span>复制账号</span>
-              </button>
-            </div>
-          ` : ''}
-          ${system.hasLaunchPassword ? `
-            <div class="login-helper-field">
-              <span>密码</span>
-              <strong class="password-mask">••••••••</strong>
-              <button class="button button-secondary" type="button" data-copy-credential="password" data-system-id="${escapeHtml(system.id)}">
-                ${iconSvg('clipboard')}
-                <span>复制密码</span>
-              </button>
-            </div>
-          ` : ''}
-        </div>
-        <div class="login-helper-actions">
-          ${system.hasLaunchUsername ? `
-            <button class="button button-primary" type="button" data-copy-and-open data-system-id="${escapeHtml(system.id)}">
-              ${iconSvg('clipboard')}
-              <span>复制账号并打开系统</span>
-            </button>
-          ` : ''}
-          <a class="button button-secondary" href="${helperUrl}" target="_blank" rel="noopener noreferrer" data-open-system>
-            打开系统
-          </a>
-        </div>
-      </section>
-    `;
-  }
-
-  function renderHelperDock() {
-    const system = state.helperSystemId ? findSystem(state.helperSystemId) : null;
-    if (!system || !hasCredentials(system)) return '';
-    return `
-      <aside class="login-helper-dock" aria-label="当前登录助手">
-        <div>
-          <span>当前登录助手</span>
-          <strong>${escapeHtml(system.name)}</strong>
-        </div>
-        ${system.hasLaunchUsername ? `
-          <button class="button button-secondary" type="button" data-copy-credential="username" data-system-id="${escapeHtml(system.id)}">
-            ${iconSvg('clipboard')}
-            <span>账号</span>
-          </button>
-        ` : ''}
-        ${system.hasLaunchPassword ? `
-          <button class="button button-secondary" type="button" data-copy-credential="password" data-system-id="${escapeHtml(system.id)}">
-            ${iconSvg('clipboard')}
-            <span>密码</span>
-          </button>
-        ` : ''}
-      </aside>
-    `;
-  }
-
   async function copyTextToClipboard(value) {
     const text = String(value || '');
     if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
@@ -182,6 +100,21 @@
     });
   }
 
+
+  function showToast(message, tone = 'info') {
+    document.querySelectorAll('.portal-toast').forEach((toast) => toast.remove());
+    const toast = document.createElement('aside');
+    toast.className = `portal-toast ${tone === 'error' ? 'is-error' : ''}`;
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    window.setTimeout(() => {
+      toast.classList.add('is-hiding');
+      window.setTimeout(() => toast.remove(), 220);
+    }, 2400);
+  }
+
   function renderCategories() {
     const categories = state.config.categories;
     return `
@@ -221,12 +154,12 @@
           const tags = (system.tags || []).slice(0, 3);
           const hasImage = Boolean(system.image);
           const cardClass = hasImage ? 'system-card system-card-layout has-image' : 'system-card';
-          const opensHelper = !disabled && hasCredentials(system);
+          const directLaunch = !disabled && hasCredentials(system);
           const linkOverlay = disabled
             ? ''
-            : opensHelper
-              ? `<button class="system-card-link" type="button" data-login-helper-system-id="${escapeHtml(system.id)}" aria-label="打开${escapeHtml(system.name)}登录助手"></button>`
-              : `<a class="system-card-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="打开${escapeHtml(system.name)}"></a>`;
+            : directLaunch
+              ? `<button class="system-card-link" type="button" data-direct-launch-system-id="${escapeHtml(system.id)}" aria-label="${'\u6253\u5f00'}${escapeHtml(system.name)}${'\u5e76\u590d\u5236\u5bc6\u7801'}"></button>`
+              : `<a class="system-card-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="${'\u6253\u5f00'}${escapeHtml(system.name)}"></a>`;
           const imageMarkup = hasImage
             ? `<div class="system-card-media"><img class="system-card-image" src="${escapeHtml(system.image)}" alt="${escapeHtml(system.name)}系统图片" onerror="this.closest('.system-card-media')?.remove()"></div>`
             : '';
@@ -343,8 +276,6 @@
         </div>
         <a href="#portal-root">返回顶部</a>
       </footer>
-      ${renderHelperDock()}
-      ${renderLoginHelper()}
     `;
 
     bindEvents();
@@ -380,43 +311,10 @@
       });
     });
 
-    document.querySelectorAll('[data-login-helper-system-id]').forEach((button) => {
+    document.querySelectorAll('[data-direct-launch-system-id]').forEach((button) => {
       button.addEventListener('click', (event) => {
         event.preventDefault();
-        state.helperSystemId = button.dataset.loginHelperSystemId;
-        state.helperOpen = true;
-        renderPortal();
-      });
-    });
-
-    document.querySelectorAll('[data-close-login-helper]').forEach((button) => {
-      button.addEventListener('click', () => {
-        state.helperOpen = false;
-        renderPortal();
-      });
-    });
-
-    document.querySelectorAll('[data-open-system]').forEach((link) => {
-      link.addEventListener('click', () => {
-        state.helperOpen = false;
-        window.setTimeout(renderPortal, 120);
-      });
-    });
-
-    document.querySelectorAll('[data-copy-and-open]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const system = findSystem(button.dataset.systemId);
-        if (!system) return;
-        const launchWindow = window.open('', '_blank');
-        await copyCredential(system.id, 'username', button);
-        if (launchWindow) {
-          launchWindow.opener = null;
-          launchWindow.location.href = getSystemHref(system);
-        } else {
-          window.open(getSystemHref(system), '_blank', 'noopener,noreferrer');
-        }
-        state.helperOpen = false;
-        renderPortal();
+        launchSystemWithCopiedPassword(button.dataset.directLaunchSystemId, button);
       });
     });
 
@@ -429,9 +327,32 @@
     });
   }
 
-  async function copyCredential(systemId, field, button) {
-    const originalLabel = button.querySelector('span')?.textContent || button.textContent || '';
-    button.disabled = true;
+  async function launchSystemWithCopiedPassword(systemId, button) {
+    const system = findSystem(systemId);
+    if (!system) return;
+    const href = getSystemHref(system);
+    const launchWindow = window.open(href, '_blank', 'noopener,noreferrer');
+    const copyPromise = system.hasLaunchPassword
+      ? copyCredential(system.id, 'password', button, { successText: '\u5bc6\u7801\u5df2\u590d\u5236' })
+      : Promise.resolve(false);
+
+    const copied = await copyPromise;
+    if (!launchWindow) {
+      window.location.href = href;
+    }
+    if (copied) {
+      showToast('\u5bc6\u7801\u5df2\u590d\u5236\uff0c\u5df2\u6253\u5f00\u7cfb\u7edf');
+    } else if (system.hasLaunchPassword) {
+      showToast('\u5bc6\u7801\u590d\u5236\u5931\u8d25\uff0c\u5df2\u6253\u5f00\u7cfb\u7edf', 'error');
+    } else {
+      showToast('\u672a\u914d\u7f6e\u5bc6\u7801\uff0c\u5df2\u6253\u5f00\u7cfb\u7edf');
+    }
+  }
+
+  async function copyCredential(systemId, field, button, options = {}) {
+    const label = button?.querySelector('span');
+    const originalLabel = label?.textContent || button?.textContent || '';
+    if (button) button.disabled = true;
     try {
       const response = await fetch(`/api/credential-copy/${encodeURIComponent(systemId)}/${encodeURIComponent(field)}`, {
         cache: 'no-store'
@@ -439,19 +360,19 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = await response.json();
       await copyTextToClipboard(payload.value || '');
-      const label = button.querySelector('span');
-      if (label) label.textContent = '已复制';
+      if (label) label.textContent = options.successText || '\u5df2\u590d\u5236';
       window.setTimeout(() => {
         if (label) label.textContent = originalLabel;
       }, 1600);
+      return true;
     } catch (error) {
-      const label = button.querySelector('span');
-      if (label) label.textContent = '复制失败';
+      if (label) label.textContent = '\u590d\u5236\u5931\u8d25';
       window.setTimeout(() => {
         if (label) label.textContent = originalLabel;
       }, 1800);
+      return false;
     } finally {
-      button.disabled = false;
+      if (button) button.disabled = false;
     }
   }
 
