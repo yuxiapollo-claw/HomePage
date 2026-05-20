@@ -429,6 +429,24 @@ def attach_launch_metadata(config):
     return next_config
 
 
+def public_portal_config(config):
+    credentials = read_launch_credentials()
+    next_config = dict(config)
+    next_systems = []
+    for system in config.get('systems', []):
+        next_system = dict(system)
+        profile = credentials.get(system.get('credentialProfile')) if system.get('credentialProfile') else None
+        launch_mode = 'proxy' if profile and profile.get('launchMode') == 'proxy' else 'direct'
+        login_url = profile.get('loginUrl') if profile and profile.get('loginUrl') else system.get('url')
+        next_system['launchMode'] = launch_mode
+        next_system['launchHref'] = '/api/launch/%s' % system.get('id') if launch_mode == 'proxy' else login_url
+        next_system['hasLaunchUsername'] = bool(profile and profile.get('username'))
+        next_system['hasLaunchPassword'] = bool(profile and profile.get('password'))
+        next_systems.append(next_system)
+    next_config['systems'] = next_systems
+    return next_config
+
+
 def sync_launch_credentials(system, payload):
     launch_username = unicode_or_string(payload.get('launchUsername')).strip()
     launch_password = unicode_or_string(payload.get('launchPassword'))
@@ -441,6 +459,8 @@ def sync_launch_credentials(system, payload):
         'password': launch_password or existing.get('password') or '',
         'method': existing.get('method') or 'POST',
         'loginUrl': existing.get('loginUrl') or system.get('url'),
+        'launchMode': existing.get('launchMode') or 'direct',
+        'proxyMode': existing.get('proxyMode') or '',
         'fields': existing.get('fields') or {
             'username': 'username',
             'password': 'password'
@@ -448,6 +468,26 @@ def sync_launch_credentials(system, payload):
         'extraFields': existing.get('extraFields') or {}
     }
     write_launch_credentials(credentials)
+
+
+def credential_copy_payload(config, system_id, field):
+    if field not in ('username', 'password'):
+        return None
+    system = None
+    for item in config.get('systems', []):
+        if item.get('id') == system_id:
+            system = item
+            break
+    if not system or not system.get('credentialProfile'):
+        return None
+    credentials = read_launch_credentials()
+    profile = credentials.get(system.get('credentialProfile'))
+    if not profile:
+        return None
+    return {
+        'field': field,
+        'value': unicode_or_string(profile.get(field))
+    }
 
 
 def is_ledger_launch(system, profile):
@@ -1655,6 +1695,24 @@ class PortalHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                     json_response(self, 503, {'error': 'Credential profile is not configured'})
                     return
                 html_response(self, 200, render_autofill_launch_page(system, profile))
+                return
+
+            if path == '/api/public-config' and self.command == 'GET':
+                json_response(self, 200, public_portal_config(read_config()))
+                return
+
+            credential_copy_match = re.match(r'^/api/credential-copy/([^/]+)/(username|password)$', path)
+            if credential_copy_match and self.command == 'GET':
+                config = read_config()
+                payload = credential_copy_payload(
+                    config,
+                    decode_url_component(credential_copy_match.group(1)),
+                    decode_url_component(credential_copy_match.group(2))
+                )
+                if not payload:
+                    json_response(self, 404, {'error': 'Credential not found'})
+                    return
+                json_response(self, 200, payload)
                 return
 
             if path == '/api/login' and self.command == 'POST':

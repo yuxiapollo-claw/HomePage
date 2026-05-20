@@ -392,6 +392,25 @@ async function attachLaunchMetadata(options, config) {
   };
 }
 
+async function publicPortalConfig(options, config) {
+  const credentials = await readLaunchCredentials(options);
+  return {
+    ...config,
+    systems: config.systems.map((system) => {
+      const profile = system.credentialProfile ? credentials[system.credentialProfile] : null;
+      const launchMode = profile && profile.launchMode === 'proxy' ? 'proxy' : 'direct';
+      const loginUrl = profile && profile.loginUrl ? profile.loginUrl : system.url;
+      return {
+        ...system,
+        launchMode,
+        launchHref: launchMode === 'proxy' ? `/api/launch/${encodeURIComponent(system.id)}` : loginUrl,
+        hasLaunchUsername: Boolean(profile && profile.username),
+        hasLaunchPassword: Boolean(profile && profile.password)
+      };
+    })
+  };
+}
+
 async function syncLaunchCredentials(options, system, input) {
   const launchUsername = String(input.launchUsername || '').trim();
   const launchPassword = String(input.launchPassword || '');
@@ -405,6 +424,8 @@ async function syncLaunchCredentials(options, system, input) {
     password: launchPassword || existing.password || '',
     method: existing.method || 'POST',
     loginUrl: existing.loginUrl || system.url,
+    launchMode: existing.launchMode || 'direct',
+    proxyMode: existing.proxyMode || '',
     fields: existing.fields || {
       username: 'username',
       password: 'password'
@@ -412,6 +433,21 @@ async function syncLaunchCredentials(options, system, input) {
     extraFields: existing.extraFields || {}
   };
   await writeLaunchCredentials(options, credentials);
+}
+
+async function getCredentialCopyPayload(options, config, systemId, field) {
+  if (field !== 'username' && field !== 'password') {
+    return null;
+  }
+  const system = config.systems.find((item) => item.id === systemId);
+  if (!system || !system.credentialProfile) return null;
+  const credentials = await readLaunchCredentials(options);
+  const profile = credentials[system.credentialProfile];
+  if (!profile) return null;
+  return {
+    field,
+    value: String(profile[field] || '')
+  };
 }
 
 function targetOrigin(value) {
@@ -1477,6 +1513,28 @@ function createServer(options = {}) {
           return;
         }
         htmlResponse(response, 200, renderAutofillLaunchPage(system, profile));
+        return;
+      }
+
+      if (url.pathname === '/api/public-config' && request.method === 'GET') {
+        jsonResponse(response, 200, await publicPortalConfig(options, await readConfig(configPath)));
+        return;
+      }
+
+      const credentialCopyMatch = url.pathname.match(/^\/api\/credential-copy\/([^/]+)\/(username|password)$/);
+      if (credentialCopyMatch && request.method === 'GET') {
+        const config = await readConfig(configPath);
+        const payload = await getCredentialCopyPayload(
+          options,
+          config,
+          decodeURIComponent(credentialCopyMatch[1]),
+          decodeURIComponent(credentialCopyMatch[2])
+        );
+        if (!payload) {
+          jsonResponse(response, 404, { error: 'Credential not found' });
+          return;
+        }
+        jsonResponse(response, 200, payload);
         return;
       }
 

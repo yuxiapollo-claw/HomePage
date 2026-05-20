@@ -105,32 +105,48 @@ test('active system cards are whole-card links that open in a new tab', async ()
   const app = await readFile('assets/app.js', 'utf8');
   const styles = await readFile('assets/styles.css', 'utf8');
 
-  assert.match(app, /const cardTag = disabled \? 'article' : 'a'/);
+  assert.match(app, /const linkOverlay = disabled/);
+  assert.match(app, /<a class="system-card-link"/);
+  assert.match(app, /<article class="\$\{cardClass\}/);
   assert.match(app, /target="_blank"/);
   assert.match(app, /rel="noopener noreferrer"/);
   assert.doesNotMatch(app, /system-link/);
   assert.match(app, /imageMarkup/);
   assert.match(app, /onerror="this\.closest\('\.system-card-media'\)\?\.remove\(\)"/);
   assert.match(styles, /\.system-card-link\s*{/);
+  assert.match(styles, /position:\s*absolute/);
   assert.doesNotMatch(styles, /\.system-link/);
 });
 
-test('credential-profile cards route through the server-side launch endpoint', async () => {
+test('credential-profile cards can open original systems and expose copy controls', async () => {
   const app = await readFile('assets/app.js', 'utf8');
   const admin = await readFile('assets/admin.js', 'utf8');
   const nodeServer = await readFile('server.js', 'utf8');
   const pythonServer = await readFile('server.py', 'utf8');
 
   assert.match(app, /function getSystemHref/);
-  assert.match(app, /\/api\/launch\/\$\{encodeURIComponent\(system\.id\)\}/);
+  assert.match(app, /system\.launchHref \|\| system\.url/);
+  assert.match(app, /function renderCredentialActions/);
+  assert.match(app, /data-copy-credential/);
+  assert.match(app, /\/api\/credential-copy\/\$\{encodeURIComponent\(systemId\)\}/);
+  assert.match(app, /navigator\.clipboard\.writeText/);
+  assert.match(app, /api\/public-config/);
   assert.match(admin, /name="credentialProfile"/);
   assert.match(admin, /name="launchUsername"/);
   assert.match(admin, /name="launchPassword"/);
+  assert.match(nodeServer, /api\/public-config/);
+  assert.match(nodeServer, /api\\\/credential-copy/);
+  assert.match(nodeServer, /launchMode:\s*existing\.launchMode \|\| 'direct'/);
+  assert.match(nodeServer, /proxyMode:\s*existing\.proxyMode \|\| ''/);
   assert.match(nodeServer, /PORTAL_LAUNCH_CREDENTIALS_JSON/);
   assert.match(nodeServer, /function writeLaunchCredentials/);
   assert.match(nodeServer, /const launchMatch = url\.pathname\.match/);
   assert.match(nodeServer, /api\\\/launch/);
   assert.match(nodeServer, /decodeURIComponent\(cookies\[ROOT_PROXY_COOKIE\]\)/);
+  assert.match(pythonServer, /path == '\/api\/public-config'/);
+  assert.match(pythonServer, /credential_copy_match = re\.match/);
+  assert.match(pythonServer, /'launchMode': existing\.get\('launchMode'\) or 'direct'/);
+  assert.match(pythonServer, /'proxyMode': existing\.get\('proxyMode'\) or ''/);
   assert.match(pythonServer, /PORTAL_LAUNCH_CREDENTIALS_JSON/);
   assert.match(pythonServer, /def write_launch_credentials/);
   assert.match(pythonServer, /launch_match = re\.match/);

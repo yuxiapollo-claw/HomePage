@@ -43,10 +43,30 @@
   }
 
   function getSystemHref(system) {
-    if (String(system.credentialProfile || '').trim()) {
+    if (system.launchMode === 'proxy' && String(system.credentialProfile || '').trim()) {
       return `/api/launch/${encodeURIComponent(system.id)}`;
     }
-    return system.url || '#';
+    return system.launchHref || system.url || '#';
+  }
+
+  function renderCredentialActions(system) {
+    if (!system.hasLaunchUsername && !system.hasLaunchPassword) return '';
+    return `
+      <div class="credential-actions" aria-label="${escapeHtml(system.name)}凭据复制">
+        ${system.hasLaunchUsername ? `
+          <button class="credential-copy" type="button" data-copy-credential="username" data-system-id="${escapeHtml(system.id)}">
+            ${iconSvg('clipboard')}
+            <span>复制账号</span>
+          </button>
+        ` : ''}
+        ${system.hasLaunchPassword ? `
+          <button class="credential-copy" type="button" data-copy-credential="password" data-system-id="${escapeHtml(system.id)}">
+            ${iconSvg('clipboard')}
+            <span>复制密码</span>
+          </button>
+        ` : ''}
+      </div>
+    `;
   }
 
   function filterSystems() {
@@ -103,16 +123,17 @@
           const tags = (system.tags || []).slice(0, 3);
           const hasImage = Boolean(system.image);
           const cardClass = hasImage ? 'system-card system-card-layout has-image' : 'system-card';
-          const cardTag = disabled ? 'article' : 'a';
-          const cardAttributes = disabled
+          const linkOverlay = disabled
             ? ''
-            : ` href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer"`;
+            : `<a class="system-card-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" aria-label="打开${escapeHtml(system.name)}"></a>`;
           const imageMarkup = hasImage
             ? `<div class="system-card-media"><img class="system-card-image" src="${escapeHtml(system.image)}" alt="${escapeHtml(system.name)}系统图片" onerror="this.closest('.system-card-media')?.remove()"></div>`
             : '';
+          const credentialActions = renderCredentialActions(system);
 
           return `
-            <${cardTag} class="${cardClass} ${disabled ? 'is-placeholder' : 'system-card-link'}"${cardAttributes}>
+            <article class="${cardClass} ${disabled ? 'is-placeholder' : 'is-link-card'}">
+              ${linkOverlay}
               <div class="system-card-content">
                 <div class="system-card-top">
                   <div class="system-icon">${iconSvg(system.icon)}</div>
@@ -126,9 +147,10 @@
                 <div class="tag-row">
                   ${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}
                 </div>
+                ${credentialActions}
               </div>
               ${imageMarkup}
-            </${cardTag}>
+            </article>
           `;
         }).join('')}
       </section>
@@ -256,6 +278,38 @@
         renderPortal();
       });
     });
+
+    document.querySelectorAll('[data-copy-credential]').forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const field = button.dataset.copyCredential;
+        const systemId = button.dataset.systemId;
+        const originalLabel = button.querySelector('span')?.textContent || '';
+        button.disabled = true;
+        try {
+          const response = await fetch(`/api/credential-copy/${encodeURIComponent(systemId)}/${encodeURIComponent(field)}`, {
+            cache: 'no-store'
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const payload = await response.json();
+          await navigator.clipboard.writeText(payload.value || '');
+          const label = button.querySelector('span');
+          if (label) label.textContent = '已复制';
+          window.setTimeout(() => {
+            if (label) label.textContent = originalLabel;
+          }, 1600);
+        } catch (error) {
+          const label = button.querySelector('span');
+          if (label) label.textContent = '复制失败';
+          window.setTimeout(() => {
+            if (label) label.textContent = originalLabel;
+          }, 1800);
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
   }
 
   function updateResults() {
@@ -282,7 +336,7 @@
 
   async function init() {
     try {
-      const response = await fetch('assets/config.json', { cache: 'no-store' });
+      const response = await fetch('/api/public-config', { cache: 'no-store' });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
