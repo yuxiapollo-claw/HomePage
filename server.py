@@ -47,9 +47,11 @@ except NameError:
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 CONFIG_PATH = os.path.join(ROOT_DIR, 'assets', 'config.json')
 SESSION_COOKIE = 'portal_admin_session'
+USER_SESSION_COOKIE = 'portal_user_session'
 ROOT_PROXY_COOKIE = 'portal_root_proxy'
 MAX_BODY_BYTES = 1024 * 1024
 SESSIONS = {}
+USER_SESSIONS = {}
 
 
 def ensure_dir(path):
@@ -413,6 +415,345 @@ def write_launch_credentials(credentials):
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+def get_portal_users():
+    raw = os.environ.get('PORTAL_USERS_JSON')
+    if raw:
+        return json.loads(raw)
+    if not os.environ.get('PORTAL_USER_PASSWORD'):
+        return {}
+    return {
+        'user': {
+            'password': os.environ.get('PORTAL_USER_PASSWORD'),
+            'displayName': u'普通用户'
+        }
+    }
+
+
+def portal_users_enabled():
+    return bool(os.environ.get('PORTAL_USERS_JSON') or os.environ.get('PORTAL_USER_PASSWORD') or os.environ.get('PORTAL_USERS_FILE'))
+
+
+def public_user(username, profile=None):
+    profile = profile or {}
+    return {
+        'username': unicode_or_string(username),
+        'displayName': unicode_or_string(profile.get('displayName') or username),
+        'department': unicode_or_string(profile.get('department')),
+        'email': unicode_or_string(profile.get('email'))
+    }
+
+
+def get_portal_users_path():
+    return os.environ.get('PORTAL_USERS_FILE', '/etc/service-portal/portal-users.json')
+
+
+def read_portal_users():
+    users = get_portal_users()
+    users_path = get_portal_users_path()
+    if os.path.exists(users_path):
+        with open(users_path, 'rb') as handle:
+            file_users = json.loads(handle.read().decode('utf-8'))
+        users.update(file_users)
+    return users
+
+
+def write_portal_users(users):
+    users_path = get_portal_users_path()
+    ensure_dir(os.path.dirname(users_path))
+    fd, temp_path = tempfile.mkstemp(prefix='portal-users-', suffix='.json', dir=os.path.dirname(users_path))
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write((json.dumps(users, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
+        try:
+            os.chmod(temp_path, 0o600)
+        except Exception:
+            pass
+        os.rename(temp_path, users_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def normalize_portal_user(payload, require_password=True):
+    username = unicode_or_string(payload.get('username')).strip()
+    display_name = unicode_or_string(payload.get('displayName') or payload.get('name')).strip()
+    department = unicode_or_string(payload.get('department')).strip()
+    email = unicode_or_string(payload.get('email')).strip().lower()
+    password = unicode_or_string(payload.get('password'))
+    password_confirm = unicode_or_string(payload.get('passwordConfirm'))
+    if not re.match(r'^[a-zA-Z0-9_.-]{2,50}$', username):
+        raise ValueError('Username must be 2-50 letters, numbers, dot, underscore, or hyphen')
+    if not display_name:
+        raise ValueError('Name is required')
+    if not department:
+        raise ValueError('Department is required')
+    if not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email):
+        raise ValueError('Valid email is required')
+    if require_password and len(password) < 6:
+        raise ValueError('Password must be at least 6 characters')
+    if require_password and password != password_confirm:
+        raise ValueError('Passwords do not match')
+    return {
+        'username': unicode_or_string(username),
+        'displayName': unicode_or_string(display_name),
+        'department': unicode_or_string(department),
+        'email': unicode_or_string(email),
+        'password': unicode_or_string(password)
+    }
+
+
+def passwords_match(payload):
+    return unicode_or_string(payload.get('password')) == unicode_or_string(payload.get('passwordConfirm'))
+
+
+def list_portal_departments():
+    departments = set()
+    for profile in read_portal_users().values():
+        if not isinstance(profile, dict):
+            continue
+        department = unicode_or_string(profile.get('department')).strip()
+        if department:
+            departments.add(department)
+    return sorted(departments)
+
+
+def register_portal_user(payload):
+    normalized = normalize_portal_user(payload)
+    users = read_portal_users()
+    if normalized.get('username') in users:
+        raise KeyError('Username already exists')
+    users[normalized.get('username')] = {
+        'password': unicode_or_string(normalized.get('password')),
+        'displayName': unicode_or_string(normalized.get('displayName')),
+        'department': unicode_or_string(normalized.get('department')),
+        'email': unicode_or_string(normalized.get('email')),
+        'createdAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    }
+    write_portal_users(users)
+    return public_user(normalized.get('username'), users[normalized.get('username')])
+
+
+def reset_portal_user_password(payload):
+    username = unicode_or_string(payload.get('username')).strip()
+    email = unicode_or_string(payload.get('email')).strip().lower()
+    password = unicode_or_string(payload.get('password'))
+    if not username or not email or len(password) < 6 or not passwords_match(payload):
+        return None
+    users = read_portal_users()
+    profile = users.get(username)
+    if not profile or unicode_or_string(profile.get('email')).lower() != email:
+        return None
+    profile = dict(profile)
+    profile['password'] = password
+    profile['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    users[username] = profile
+    write_portal_users(users)
+    return public_user(username, profile)
+
+
+def change_portal_user_password(session, payload):
+    current_password = unicode_or_string(payload.get('currentPassword'))
+    password = unicode_or_string(payload.get('password'))
+    if not session or len(password) < 6 or not passwords_match(payload):
+        return None
+    users = read_portal_users()
+    profile = users.get(session.get('username'))
+    if not profile or unicode_or_string(profile.get('password')) != current_password:
+        return None
+    profile = dict(profile)
+    profile['password'] = password
+    profile['updatedAt'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    users[session.get('username')] = profile
+    write_portal_users(users)
+    return public_user(session.get('username'), profile)
+
+
+def authenticate_portal_user(username, password):
+    clean_username = unicode_or_string(username).strip()
+    profile = read_portal_users().get(clean_username)
+    if not profile or unicode_or_string(profile.get('password')) != unicode_or_string(password):
+        return None
+    return public_user(clean_username, profile)
+
+
+def get_user_credentials_path():
+    return os.environ.get('PORTAL_USER_CREDENTIALS_FILE', '/etc/service-portal/user-credentials.json')
+
+
+def read_user_credentials():
+    raw = os.environ.get('PORTAL_USER_CREDENTIALS_JSON')
+    if raw:
+        return json.loads(raw)
+    credential_path = get_user_credentials_path()
+    if not os.path.exists(credential_path):
+        return {}
+    with open(credential_path, 'rb') as handle:
+        return json.loads(handle.read().decode('utf-8'))
+
+
+def write_user_credentials(credentials):
+    if os.environ.get('PORTAL_USER_CREDENTIALS_JSON'):
+        return
+    credential_path = get_user_credentials_path()
+    ensure_dir(os.path.dirname(credential_path))
+    fd, temp_path = tempfile.mkstemp(prefix='user-credentials-', suffix='.json', dir=os.path.dirname(credential_path))
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write((json.dumps(credentials, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
+        try:
+            os.chmod(temp_path, 0o600)
+        except Exception:
+            pass
+        os.rename(temp_path, credential_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def is_user_authenticated(handler):
+    cookie = parse_cookie(handler.headers.get('Cookie'))
+    if USER_SESSION_COOKIE not in cookie:
+        return None
+    return USER_SESSIONS.get(cookie[USER_SESSION_COOKIE].value)
+
+
+def require_user_auth(handler):
+    session = is_user_authenticated(handler)
+    if session:
+        return session
+    json_response(handler, 401, {'error': 'User authentication required'})
+    return None
+
+
+def credential_base_for_system(system, global_profile=None):
+    global_profile = global_profile or {}
+    return {
+        'loginUrl': global_profile.get('loginUrl') or system.get('url'),
+        'launchMode': global_profile.get('launchMode') or 'direct',
+        'proxyMode': global_profile.get('proxyMode') or '',
+        'method': global_profile.get('method') or 'POST',
+        'fields': global_profile.get('fields') or {
+            'username': 'username',
+            'password': 'password'
+        },
+        'extraFields': global_profile.get('extraFields') or {}
+    }
+
+
+def personal_profile_for_system(config, session, system):
+    if not session or not system:
+        return None
+    all_user_credentials = read_user_credentials()
+    personal = (all_user_credentials.get(session.get('username')) or {}).get(system.get('id'))
+    if not personal:
+        return None
+    global_credentials = read_launch_credentials()
+    global_profile = global_credentials.get(system.get('credentialProfile')) if system.get('credentialProfile') else {}
+    result = credential_base_for_system(system, global_profile or {})
+    result.update(personal)
+    result['username'] = unicode_or_string(personal.get('username'))
+    result['password'] = unicode_or_string(personal.get('password'))
+    return result
+
+
+def public_portal_config_for_session(config, session):
+    global_credentials = read_launch_credentials()
+    next_config = dict(config)
+    next_config['user'] = public_user(session.get('username'), session) if session else None
+    next_systems = []
+    for system in config.get('systems', []):
+        next_system = dict(system)
+        personal_profile = personal_profile_for_system(config, session, system)
+        global_profile = global_credentials.get(system.get('credentialProfile')) if system.get('credentialProfile') else None
+        source_profile = personal_profile or global_profile
+        launch_mode = 'proxy' if source_profile and source_profile.get('launchMode') == 'proxy' else 'direct'
+        login_url = source_profile.get('loginUrl') if source_profile and source_profile.get('loginUrl') else system.get('url')
+        next_system['launchMode'] = launch_mode
+        next_system['launchHref'] = '/api/launch/%s' % system.get('id') if launch_mode == 'proxy' else login_url
+        next_system['hasLaunchUsername'] = bool(personal_profile and personal_profile.get('username'))
+        next_system['hasLaunchPassword'] = bool(personal_profile and personal_profile.get('password'))
+        next_systems.append(next_system)
+    next_config['systems'] = next_systems
+    return next_config
+
+
+def user_credential_copy_payload(config, session, system_id, field):
+    if field not in ('username', 'password'):
+        return None
+    system = None
+    for item in config.get('systems', []):
+        if item.get('id') == system_id:
+            system = item
+            break
+    profile = personal_profile_for_system(config, session, system)
+    if not profile or not profile.get(field):
+        return None
+    return {
+        'field': field,
+        'value': unicode_or_string(profile.get(field))
+    }
+
+
+def user_credentials_list(config, session):
+    all_user_credentials = read_user_credentials()
+    user_credentials = all_user_credentials.get(session.get('username')) or {}
+    systems = []
+    for system in config.get('systems', []):
+        next_system = dict(system)
+        next_system.pop('launchPassword', None)
+        credential = user_credentials.get(system.get('id')) or {}
+        next_system['credential'] = {
+            'username': unicode_or_string(credential.get('username')),
+            'hasPassword': bool(credential.get('password'))
+        }
+        systems.append(next_system)
+    return {
+        'user': public_user(session.get('username'), session),
+        'systems': systems
+    }
+
+
+def save_user_credential(config, session, system_id, payload):
+    system = None
+    for item in config.get('systems', []):
+        if item.get('id') == system_id:
+            system = item
+            break
+    if not system:
+        return None
+    global_credentials = read_launch_credentials()
+    global_profile = global_credentials.get(system.get('credentialProfile')) if system.get('credentialProfile') else {}
+    all_credentials = read_user_credentials()
+    user_credentials = dict(all_credentials.get(session.get('username')) or {})
+    existing = user_credentials.get(system.get('id')) or {}
+    username = unicode_or_string(payload.get('username')).strip()
+    password_input = unicode_or_string(payload.get('password'))
+    password = password_input if 'password' in payload and password_input else unicode_or_string(existing.get('password'))
+    stored = credential_base_for_system(system, global_profile or {})
+    stored['username'] = username
+    stored['password'] = password
+    user_credentials[system.get('id')] = stored
+    all_credentials[session.get('username')] = user_credentials
+    write_user_credentials(all_credentials)
+    return {
+        'systemId': system.get('id'),
+        'credential': {
+            'username': username,
+            'hasPassword': bool(password)
+        }
+    }
+
+
+def delete_user_credential(session, system_id):
+    all_credentials = read_user_credentials()
+    user_credentials = dict(all_credentials.get(session.get('username')) or {})
+    if system_id in user_credentials:
+        del user_credentials[system_id]
+    all_credentials[session.get('username')] = user_credentials
+    write_user_credentials(all_credentials)
+    return {'removed': system_id}
 
 
 def attach_launch_metadata(config):
@@ -1184,7 +1525,7 @@ def parse_proxy_referer(handler, pathname):
 
 
 def is_portal_native_path(pathname):
-    if pathname == '/' or re.match(r'^/(index|admin|starbucks)\\.html$', pathname, re.I):
+    if pathname == '/' or re.match(r'^/(index|admin|starbucks|user-settings)\\.html$', pathname, re.I):
         return True
     if pathname.startswith('/assets/') or pathname.startswith('/docs/'):
         return True
@@ -1192,8 +1533,19 @@ def is_portal_native_path(pathname):
         pathname == '/api/session' or
         pathname == '/api/login' or
         pathname == '/api/logout' or
+        pathname == '/api/user-session' or
+        pathname == '/api/user-departments' or
+        pathname == '/api/user-login' or
+        pathname == '/api/user-register' or
+        pathname == '/api/user-password-reset' or
+        pathname == '/api/user-password' or
+        pathname == '/api/user-logout' or
+        pathname == '/api/user-credentials' or
+        pathname.startswith('/api/user-credentials/') or
         pathname == '/api/config' or
         pathname == '/api/upload' or
+        pathname == '/api/public-config' or
+        pathname.startswith('/api/credential-copy/') or
         pathname.startswith('/api/launch/') or
         pathname == '/api/systems' or
         pathname.startswith('/api/systems/')
@@ -1670,6 +2022,18 @@ class PortalHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 json_response(self, 200, {'authenticated': is_authenticated(self)})
                 return
 
+            if path == '/api/user-session' and self.command == 'GET':
+                session = is_user_authenticated(self)
+                json_response(self, 200, {
+                    'authenticated': bool(session),
+                    'user': public_user(session.get('username'), session) if session else None
+                })
+                return
+
+            if path == '/api/user-departments' and self.command == 'GET':
+                json_response(self, 200, {'departments': list_portal_departments()})
+                return
+
             launch_match = re.match(r'^/api/launch/([^/]+)$', path)
             if launch_match and self.command == 'GET':
                 system_id = decode_url_component(launch_match.group(1))
@@ -1682,37 +2046,142 @@ class PortalHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 if not system:
                     json_response(self, 404, {'error': 'System not found'})
                     return
-                profile_id = unicode_or_string(system.get('credentialProfile')).strip()
-                if not profile_id:
+                users_enabled = portal_users_enabled()
+                session = require_user_auth(self) if users_enabled else None
+                if users_enabled and not session:
+                    return
+                credentials = None if users_enabled else read_launch_credentials()
+                global_profile = None
+                if not users_enabled and system.get('credentialProfile'):
+                    global_profile = credentials.get(system.get('credentialProfile'))
+                profile = personal_profile_for_system(config, session, system) if users_enabled else global_profile
+                if not profile:
                     if not system.get('url') or system.get('url') == '#':
                         json_response(self, 404, {'error': 'System launch is not configured'})
                         return
                     redirect_response(self, system.get('url'))
                     return
-                credentials = read_launch_credentials()
-                profile = credentials.get(profile_id)
-                if not profile:
-                    json_response(self, 503, {'error': 'Credential profile is not configured'})
+                if users_enabled and profile.get('launchMode') != 'proxy' and not is_ledger_launch(system, profile):
+                    redirect_response(self, profile.get('loginUrl') or system.get('url'))
                     return
                 html_response(self, 200, render_autofill_launch_page(system, profile))
                 return
 
             if path == '/api/public-config' and self.command == 'GET':
-                json_response(self, 200, public_portal_config(read_config()))
+                config = read_config()
+                if portal_users_enabled():
+                    session = require_user_auth(self)
+                    if not session:
+                        return
+                    json_response(self, 200, public_portal_config_for_session(config, session))
+                    return
+                json_response(self, 200, public_portal_config(config))
                 return
 
             credential_copy_match = re.match(r'^/api/credential-copy/([^/]+)/(username|password)$', path)
             if credential_copy_match and self.command == 'GET':
                 config = read_config()
-                payload = credential_copy_payload(
-                    config,
-                    decode_url_component(credential_copy_match.group(1)),
-                    decode_url_component(credential_copy_match.group(2))
-                )
+                system_id = decode_url_component(credential_copy_match.group(1))
+                field = decode_url_component(credential_copy_match.group(2))
+                if portal_users_enabled():
+                    session = require_user_auth(self)
+                    if not session:
+                        return
+                    payload = user_credential_copy_payload(config, session, system_id, field)
+                else:
+                    payload = credential_copy_payload(config, system_id, field)
                 if not payload:
                     json_response(self, 404, {'error': 'Credential not found'})
                     return
                 json_response(self, 200, payload)
+                return
+
+            if path == '/api/user-login' and self.command == 'POST':
+                body = read_body(self)
+                user = authenticate_portal_user(body.get('username'), body.get('password'))
+                if not user:
+                    json_response(self, 401, {'error': 'Invalid username or password'})
+                    return
+                sid = session_id()
+                session = dict(user)
+                session['createdAt'] = time.time()
+                USER_SESSIONS[sid] = session
+                json_response(self, 200, {'authenticated': True, 'user': user}, {
+                    'Set-Cookie': '%s=%s; Path=/; HttpOnly; SameSite=Strict' % (USER_SESSION_COOKIE, sid)
+                })
+                return
+
+            if path == '/api/user-register' and self.command == 'POST':
+                try:
+                    user = register_portal_user(read_body(self))
+                    json_response(self, 201, {'user': user})
+                except KeyError as exc:
+                    json_response(self, 409, {'error': unicode_or_string(exc)})
+                except ValueError as exc:
+                    json_response(self, 400, {'error': unicode_or_string(exc)})
+                return
+
+            if path == '/api/user-password-reset' and self.command == 'POST':
+                body = read_body(self)
+                if (not passwords_match(body)) or len(unicode_or_string(body.get('password'))) < 6:
+                    json_response(self, 400, {'error': 'New passwords do not match or are too short'})
+                    return
+                user = reset_portal_user_password(body)
+                if not user:
+                    json_response(self, 404, {'error': 'User and email do not match'})
+                    return
+                json_response(self, 200, {'user': user})
+                return
+
+            if path == '/api/user-password' and self.command == 'PUT':
+                session = require_user_auth(self)
+                if not session:
+                    return
+                user = change_portal_user_password(session, read_body(self))
+                if not user:
+                    json_response(self, 400, {'error': 'Current password is invalid or new password is too short'})
+                    return
+                json_response(self, 200, {'user': user})
+                return
+
+            if path == '/api/user-logout' and self.command == 'POST':
+                cookie = parse_cookie(self.headers.get('Cookie'))
+                if USER_SESSION_COOKIE in cookie:
+                    USER_SESSIONS.pop(cookie[USER_SESSION_COOKIE].value, None)
+                json_response(self, 200, {'authenticated': False}, {
+                    'Set-Cookie': '%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict' % USER_SESSION_COOKIE
+                })
+                return
+
+            if path == '/api/user-credentials' and self.command == 'GET':
+                session = require_user_auth(self)
+                if not session:
+                    return
+                json_response(self, 200, user_credentials_list(read_config(), session))
+                return
+
+            user_credential_match = re.match(r'^/api/user-credentials/([^/]+)$', path)
+            if user_credential_match and self.command == 'PUT':
+                session = require_user_auth(self)
+                if not session:
+                    return
+                payload = save_user_credential(
+                    read_config(),
+                    session,
+                    decode_url_component(user_credential_match.group(1)),
+                    read_body(self)
+                )
+                if not payload:
+                    json_response(self, 404, {'error': 'System not found'})
+                    return
+                json_response(self, 200, payload)
+                return
+
+            if user_credential_match and self.command == 'DELETE':
+                session = require_user_auth(self)
+                if not session:
+                    return
+                json_response(self, 200, delete_user_credential(session, decode_url_component(user_credential_match.group(1))))
                 return
 
             if path == '/api/login' and self.command == 'POST':

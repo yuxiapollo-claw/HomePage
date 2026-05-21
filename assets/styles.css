@@ -300,6 +300,92 @@ button {
   box-shadow: var(--panel-shadow, var(--shadow-soft));
 }
 
+.hero-carousel {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  min-height: 188px;
+  color: #fff;
+  border-radius: 12px;
+  background: #0f2638;
+}
+
+.hero-carousel-track {
+  position: relative;
+  min-height: 188px;
+}
+
+.hero-carousel-slide {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  animation: carouselFade 15s infinite;
+  animation-delay: calc(var(--slide-index) * 5s);
+}
+
+.hero-carousel-slide img {
+  width: 100%;
+  height: 100%;
+  min-height: 188px;
+  object-fit: cover;
+  filter: saturate(0.95);
+}
+
+.hero-carousel-slide::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(180deg, rgba(8, 30, 48, 0.08), rgba(8, 30, 48, 0.72));
+}
+
+.hero-carousel-slide figcaption {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  z-index: 1;
+  display: grid;
+  gap: 4px;
+}
+
+.hero-carousel-slide strong {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.hero-carousel-slide span {
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.9;
+}
+
+.hero-carousel-dots {
+  position: absolute;
+  right: 14px;
+  top: 12px;
+  z-index: 2;
+  display: flex;
+  gap: 5px;
+}
+
+.hero-carousel-dots span {
+  width: 7px;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 50%;
+}
+
+@keyframes carouselFade {
+  0%, 30% {
+    opacity: 1;
+  }
+
+  36%, 100% {
+    opacity: 0;
+  }
+}
+
 .hero-panel p {
   margin: 8px 0 0;
   color: var(--muted-text, var(--muted));
@@ -595,6 +681,67 @@ code {
   opacity: 0.66;
 }
 
+.card-credential-actions {
+  margin-top: 8px;
+}
+
+.system-card-top-actions {
+  position: relative;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.card-password-copy {
+  width: fit-content;
+  white-space: nowrap;
+}
+
+.user-menu {
+  position: relative;
+}
+
+.user-menu-button {
+  min-width: 92px;
+}
+
+.user-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  display: grid;
+  width: 152px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.16);
+}
+
+.user-menu-panel a,
+.user-menu-panel button {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 8px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.user-menu-panel a:hover,
+.user-menu-panel button:hover {
+  background: var(--surface);
+}
+
 .portal-toast {
   position: fixed;
   right: 22px;
@@ -658,6 +805,40 @@ code {
 
 .admin-login-card .brand {
   margin-bottom: 34px;
+}
+
+.user-login-heading {
+  display: block;
+  margin-bottom: 20px;
+}
+
+.user-login-heading h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(30px, 5vw, 44px);
+  line-height: 1.1;
+}
+
+.user-login-heading p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.auth-links {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.auth-links button {
+  color: var(--blue);
+  background: transparent;
+  border: 0;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .admin-login-form,
@@ -748,6 +929,106 @@ code {
   color: var(--blue);
   font-size: 14px;
   font-weight: 800;
+}
+
+.user-login-shell {
+  background:
+    linear-gradient(180deg, rgba(247, 248, 250, 0.92), rgba(255, 255, 255, 0.98)),
+    radial-gradient(circle at 12% 16%, rgba(0, 152, 56, 0.12), transparent 34%);
+}
+
+.user-settings-section {
+  padding-top: 30px;
+}
+
+.user-settings-section .section-heading {
+  display: block;
+  max-width: 780px;
+  margin-bottom: 20px;
+}
+
+.user-settings-section .section-heading h1 {
+  margin: 0;
+  color: var(--section-title, var(--ink));
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1.1;
+}
+
+.user-credential-list {
+  display: grid;
+  gap: 14px;
+}
+
+.user-credential-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 56, 136, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 22px 48px -40px rgba(0, 56, 136, 0.45);
+}
+
+.user-credential-card h2 {
+  margin: 6px 0 8px;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.user-credential-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.user-credential-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.user-credential-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted-text, var(--muted));
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.user-credential-form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  color: var(--text, var(--ink));
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #dfe5ec;
+  border-radius: 10px;
+}
+
+.credential-password-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.credential-password-toggle {
+  min-width: 72px;
+  min-height: 44px;
+  padding-inline: 14px;
+}
+
+.credential-password-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.user-credential-form .admin-form-actions {
+  align-items: end;
+  grid-column: 1 / -1;
 }
 
 .admin-hero {
@@ -1187,7 +1468,8 @@ html[data-theme="starbucks"] .hero-panel p {
   }
 
   .admin-shell,
-  .admin-form-panel {
+  .admin-form-panel,
+  .user-credential-card {
     grid-template-columns: 1fr;
   }
 }
@@ -1226,6 +1508,10 @@ html[data-theme="starbucks"] .hero-panel p {
   }
 
   .admin-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .user-credential-form {
     grid-template-columns: 1fr;
   }
 

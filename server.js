@@ -7,6 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const SESSION_COOKIE = 'portal_admin_session';
+const USER_SESSION_COOKIE = 'portal_user_session';
 const ROOT_PROXY_COOKIE = 'portal_root_proxy';
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -208,6 +209,10 @@ function makeSlug(value) {
   return slug || `system-${crypto.randomBytes(4).toString('hex')}`;
 }
 
+function makeSessionId() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
 function readRawRequestBody(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -370,6 +375,296 @@ async function writeLaunchCredentials(options = {}, credentials) {
   const tempPath = `${credentialPath}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(credentials, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   await rename(tempPath, credentialPath);
+}
+
+function getPortalUsers(options = {}) {
+  if (options.portalUsers) return options.portalUsers;
+  const raw = process.env.PORTAL_USERS_JSON;
+  if (raw) return JSON.parse(raw);
+  if (!process.env.PORTAL_USER_PASSWORD) return {};
+  return {
+    user: {
+      password: process.env.PORTAL_USER_PASSWORD,
+      displayName: '普通用户'
+    }
+  };
+}
+
+function portalUsersEnabled(options = {}) {
+  return Boolean(options.portalUsers || options.portalUsersPath || process.env.PORTAL_USERS_JSON || process.env.PORTAL_USER_PASSWORD || process.env.PORTAL_USERS_FILE);
+}
+
+function publicUser(username, profile = {}) {
+  return {
+    username,
+    displayName: profile.displayName || username,
+    department: profile.department || '',
+    email: profile.email || ''
+  };
+}
+
+function getPortalUsersPath(options = {}) {
+  return options.portalUsersPath || process.env.PORTAL_USERS_FILE || '/etc/service-portal/portal-users.json';
+}
+
+async function readPortalUsers(options = {}) {
+  const seedUsers = getPortalUsers(options);
+  const usersPath = getPortalUsersPath(options);
+  try {
+    const fileUsers = JSON.parse(await readFile(usersPath, 'utf8'));
+    return { ...seedUsers, ...fileUsers };
+  } catch (error) {
+    if (error.code === 'ENOENT') return seedUsers;
+    throw error;
+  }
+}
+
+async function writePortalUsers(options = {}, users) {
+  const usersPath = getPortalUsersPath(options);
+  await mkdir(path.dirname(usersPath), { recursive: true });
+  const tempPath = `${usersPath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(users, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await rename(tempPath, usersPath);
+}
+
+function normalizePortalUser(input = {}, { requirePassword = true } = {}) {
+  const username = String(input.username || '').trim();
+  const displayName = String(input.displayName || input.name || '').trim();
+  const department = String(input.department || '').trim();
+  const email = String(input.email || '').trim().toLowerCase();
+  const password = String(input.password || '');
+  const passwordConfirm = String(input.passwordConfirm || '');
+  if (!/^[a-zA-Z0-9_.-]{2,50}$/.test(username)) throw new Error('Username must be 2-50 letters, numbers, dot, underscore, or hyphen');
+  if (!displayName) throw new Error('Name is required');
+  if (!department) throw new Error('Department is required');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Valid email is required');
+  if (requirePassword && password.length < 6) throw new Error('Password must be at least 6 characters');
+  if (requirePassword && password !== passwordConfirm) throw new Error('Passwords do not match');
+  return { username, displayName, department, email, password };
+}
+
+function passwordsMatch(input = {}) {
+  return String(input.password || '') === String(input.passwordConfirm || '');
+}
+
+async function listPortalDepartments(options) {
+  const users = await readPortalUsers(options);
+  return Array.from(new Set(Object.values(users)
+    .map((profile) => String(profile?.department || '').trim())
+    .filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+}
+
+async function registerPortalUser(options, input) {
+  const normalized = normalizePortalUser(input);
+  const users = await readPortalUsers(options);
+  if (users[normalized.username]) {
+    const error = new Error('Username already exists');
+    error.statusCode = 409;
+    throw error;
+  }
+  users[normalized.username] = {
+    password: normalized.password,
+    displayName: normalized.displayName,
+    department: normalized.department,
+    email: normalized.email,
+    createdAt: new Date().toISOString()
+  };
+  await writePortalUsers(options, users);
+  return publicUser(normalized.username, users[normalized.username]);
+}
+
+async function resetPortalUserPassword(options, input) {
+  const username = String(input.username || '').trim();
+  const email = String(input.email || '').trim().toLowerCase();
+  const password = String(input.password || '');
+  if (!username || !email || password.length < 6 || !passwordsMatch(input)) return null;
+  const users = await readPortalUsers(options);
+  const profile = users[username];
+  if (!profile || String(profile.email || '').toLowerCase() !== email) return null;
+  users[username] = { ...profile, password, updatedAt: new Date().toISOString() };
+  await writePortalUsers(options, users);
+  return publicUser(username, users[username]);
+}
+
+async function changePortalUserPassword(options, session, input) {
+  const currentPassword = String(input.currentPassword || '');
+  const password = String(input.password || '');
+  if (!session || password.length < 6 || !passwordsMatch(input)) return null;
+  const users = await readPortalUsers(options);
+  const profile = users[session.username];
+  if (!profile || String(profile.password || '') !== currentPassword) return null;
+  users[session.username] = { ...profile, password, updatedAt: new Date().toISOString() };
+  await writePortalUsers(options, users);
+  return publicUser(session.username, users[session.username]);
+}
+
+async function authenticatePortalUser(options, username, password) {
+  const cleanUsername = String(username || '').trim();
+  const users = await readPortalUsers(options);
+  const profile = users[cleanUsername];
+  if (!profile || String(profile.password || '') !== String(password || '')) {
+    return null;
+  }
+  return publicUser(cleanUsername, profile);
+}
+
+function getUserCredentialsPath(options = {}) {
+  return options.userCredentialsPath || process.env.PORTAL_USER_CREDENTIALS_FILE || '/etc/service-portal/user-credentials.json';
+}
+
+async function readUserCredentials(options = {}) {
+  if (options.userCredentials) return options.userCredentials;
+  const raw = process.env.PORTAL_USER_CREDENTIALS_JSON;
+  if (raw) return JSON.parse(raw);
+  try {
+    return JSON.parse(await readFile(getUserCredentialsPath(options), 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
+  }
+}
+
+async function writeUserCredentials(options = {}, credentials) {
+  if (options.userCredentials || process.env.PORTAL_USER_CREDENTIALS_JSON) {
+    return;
+  }
+  const credentialPath = getUserCredentialsPath(options);
+  await mkdir(path.dirname(credentialPath), { recursive: true });
+  const tempPath = `${credentialPath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(credentials, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await rename(tempPath, credentialPath);
+}
+
+function isUserAuthenticated(request, userSessions) {
+  const cookies = parseCookies(request.headers.cookie);
+  const session = cookies[USER_SESSION_COOKIE] ? userSessions.get(cookies[USER_SESSION_COOKIE]) : null;
+  return session || null;
+}
+
+function requireUserAuth(request, response, userSessions) {
+  const session = isUserAuthenticated(request, userSessions);
+  if (session) return session;
+  jsonResponse(response, 401, { error: 'User authentication required' });
+  return null;
+}
+
+function credentialBaseForSystem(system, globalProfile = {}) {
+  return {
+    loginUrl: globalProfile.loginUrl || system.url,
+    launchMode: globalProfile.launchMode || 'direct',
+    proxyMode: globalProfile.proxyMode || '',
+    method: globalProfile.method || 'POST',
+    fields: globalProfile.fields || {
+      username: 'username',
+      password: 'password'
+    },
+    extraFields: globalProfile.extraFields || {}
+  };
+}
+
+async function personalProfileForSystem(options, config, session, system) {
+  if (!session || !system) return null;
+  const allUserCredentials = await readUserCredentials(options);
+  const userCredentials = allUserCredentials[session.username] || {};
+  const personal = userCredentials[system.id];
+  if (!personal) return null;
+  const globalCredentials = await readLaunchCredentials(options);
+  const globalProfile = system.credentialProfile ? globalCredentials[system.credentialProfile] || {} : {};
+  return {
+    ...credentialBaseForSystem(system, globalProfile),
+    ...personal,
+    username: String(personal.username || ''),
+    password: String(personal.password || '')
+  };
+}
+
+async function publicPortalConfigForSession(options, config, session) {
+  const globalCredentials = await readLaunchCredentials(options);
+  return {
+    ...config,
+    user: session ? publicUser(session.username, session) : null,
+    systems: await Promise.all(config.systems.map(async (system) => {
+      const personalProfile = await personalProfileForSystem(options, config, session, system);
+      const globalProfile = system.credentialProfile ? globalCredentials[system.credentialProfile] || null : null;
+      const sourceProfile = personalProfile || globalProfile;
+      const launchMode = sourceProfile && sourceProfile.launchMode === 'proxy' ? 'proxy' : 'direct';
+      const loginUrl = sourceProfile && sourceProfile.loginUrl ? sourceProfile.loginUrl : system.url;
+      return {
+        ...system,
+        launchMode,
+        launchHref: launchMode === 'proxy' ? `/api/launch/${encodeURIComponent(system.id)}` : loginUrl,
+        hasLaunchUsername: Boolean(personalProfile && personalProfile.username),
+        hasLaunchPassword: Boolean(personalProfile && personalProfile.password)
+      };
+    }))
+  };
+}
+
+async function userCredentialCopyPayload(options, config, session, systemId, field) {
+  if (field !== 'username' && field !== 'password') return null;
+  const system = config.systems.find((item) => item.id === systemId);
+  const profile = await personalProfileForSystem(options, config, session, system);
+  if (!profile || !profile[field]) return null;
+  return { field, value: String(profile[field] || '') };
+}
+
+async function userCredentialsList(options, config, session) {
+  const allUserCredentials = await readUserCredentials(options);
+  const userCredentials = allUserCredentials[session.username] || {};
+  return {
+    user: publicUser(session.username, session),
+    systems: config.systems.map((system) => {
+      const credential = userCredentials[system.id] || {};
+      return {
+        ...stripLaunchSecrets(system),
+        credential: {
+          username: String(credential.username || ''),
+          hasPassword: Boolean(credential.password)
+        }
+      };
+    })
+  };
+}
+
+async function saveUserCredential(options, config, session, systemId, input) {
+  const system = config.systems.find((item) => item.id === systemId);
+  if (!system) return null;
+  const globalCredentials = await readLaunchCredentials(options);
+  const globalProfile = system.credentialProfile ? globalCredentials[system.credentialProfile] || {} : {};
+  const existingAll = await readUserCredentials(options);
+  const nextAll = { ...existingAll };
+  const userCredentials = { ...(nextAll[session.username] || {}) };
+  const existing = userCredentials[system.id] || {};
+  const username = String(input.username || '').trim();
+  const passwordInput = String(input.password || '');
+  const password = Object.prototype.hasOwnProperty.call(input, 'password') && passwordInput
+    ? passwordInput
+    : String(existing.password || '');
+  userCredentials[system.id] = {
+    ...credentialBaseForSystem(system, globalProfile),
+    username,
+    password
+  };
+  nextAll[session.username] = userCredentials;
+  await writeUserCredentials(options, nextAll);
+  return {
+    systemId: system.id,
+    credential: {
+      username,
+      hasPassword: Boolean(password)
+    }
+  };
+}
+
+async function deleteUserCredential(options, session, systemId) {
+  const existingAll = await readUserCredentials(options);
+  const nextAll = { ...existingAll };
+  const userCredentials = { ...(nextAll[session.username] || {}) };
+  delete userCredentials[systemId];
+  nextAll[session.username] = userCredentials;
+  await writeUserCredentials(options, nextAll);
+  return { removed: systemId };
 }
 
 function stripLaunchSecrets(system) {
@@ -1123,13 +1418,24 @@ function parseProxyReferer(request, pathname) {
 }
 
 function isPortalNativePath(pathname) {
-  if (pathname === '/' || /^\/(?:index|admin|starbucks)\.html$/i.test(pathname)) return true;
+  if (pathname === '/' || /^\/(?:index|admin|starbucks|user-settings)\.html$/i.test(pathname)) return true;
   if (pathname.startsWith('/assets/') || pathname.startsWith('/docs/')) return true;
   if (pathname === '/api/session'
     || pathname === '/api/login'
     || pathname === '/api/logout'
+    || pathname === '/api/user-session'
+    || pathname === '/api/user-departments'
+    || pathname === '/api/user-login'
+    || pathname === '/api/user-register'
+    || pathname === '/api/user-password-reset'
+    || pathname === '/api/user-password'
+    || pathname === '/api/user-logout'
+    || pathname === '/api/user-credentials'
+    || pathname.startsWith('/api/user-credentials/')
     || pathname === '/api/config'
     || pathname === '/api/upload'
+    || pathname === '/api/public-config'
+    || pathname.startsWith('/api/credential-copy/')
     || pathname.startsWith('/api/launch/')
     || pathname === '/api/systems'
     || pathname.startsWith('/api/systems/')) {
@@ -1473,6 +1779,7 @@ function createServer(options = {}) {
   const configPath = path.join(rootDir, 'assets', 'config.json');
   const adminPassword = options.adminPassword || process.env.ADMIN_PASSWORD || '';
   const sessions = new Map();
+  const userSessions = new Map();
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
@@ -1489,6 +1796,20 @@ function createServer(options = {}) {
         return;
       }
 
+      if (url.pathname === '/api/user-session' && request.method === 'GET') {
+        const session = isUserAuthenticated(request, userSessions);
+        jsonResponse(response, 200, {
+          authenticated: Boolean(session),
+          user: session ? publicUser(session.username, session) : null
+        });
+        return;
+      }
+
+      if (url.pathname === '/api/user-departments' && request.method === 'GET') {
+        jsonResponse(response, 200, { departments: await listPortalDepartments(options) });
+        return;
+      }
+
       const launchMatch = url.pathname.match(/^\/api\/launch\/([^/]+)$/);
       if (launchMatch && request.method === 'GET') {
         const systemId = decodeURIComponent(launchMatch[1]);
@@ -1498,8 +1819,15 @@ function createServer(options = {}) {
           jsonResponse(response, 404, { error: 'System not found' });
           return;
         }
-        const profileId = String(system.credentialProfile || '').trim();
-        if (!profileId) {
+        const usersEnabled = portalUsersEnabled(options);
+        const session = usersEnabled ? requireUserAuth(request, response, userSessions) : null;
+        if (usersEnabled && !session) return;
+        const credentials = usersEnabled ? null : await readLaunchCredentials(options);
+        const globalProfile = !usersEnabled && system.credentialProfile ? credentials[system.credentialProfile] || null : null;
+        const profile = usersEnabled
+          ? await personalProfileForSystem(options, config, session, system)
+          : globalProfile;
+        if (!profile) {
           if (!system.url || system.url === '#') {
             jsonResponse(response, 404, { error: 'System launch is not configured' });
             return;
@@ -1507,10 +1835,8 @@ function createServer(options = {}) {
           redirectResponse(response, system.url);
           return;
         }
-        const credentials = await readLaunchCredentials(options);
-        const profile = credentials[profileId];
-        if (!profile) {
-          jsonResponse(response, 503, { error: 'Credential profile is not configured' });
+        if (usersEnabled && profile.launchMode !== 'proxy' && !isLedgerLaunch(system, profile, options)) {
+          redirectResponse(response, profile.loginUrl || system.url);
           return;
         }
         htmlResponse(response, 200, renderAutofillLaunchPage(system, profile));
@@ -1518,24 +1844,129 @@ function createServer(options = {}) {
       }
 
       if (url.pathname === '/api/public-config' && request.method === 'GET') {
-        jsonResponse(response, 200, await publicPortalConfig(options, await readConfig(configPath)));
+        const config = await readConfig(configPath);
+        if (portalUsersEnabled(options)) {
+          const session = requireUserAuth(request, response, userSessions);
+          if (!session) return;
+          jsonResponse(response, 200, await publicPortalConfigForSession(options, config, session));
+          return;
+        }
+        jsonResponse(response, 200, await publicPortalConfig(options, config));
         return;
       }
 
       const credentialCopyMatch = url.pathname.match(/^\/api\/credential-copy\/([^/]+)\/(username|password)$/);
       if (credentialCopyMatch && request.method === 'GET') {
         const config = await readConfig(configPath);
-        const payload = await getCredentialCopyPayload(
-          options,
-          config,
-          decodeURIComponent(credentialCopyMatch[1]),
-          decodeURIComponent(credentialCopyMatch[2])
-        );
+        const systemId = decodeURIComponent(credentialCopyMatch[1]);
+        const field = decodeURIComponent(credentialCopyMatch[2]);
+        let payload;
+        if (portalUsersEnabled(options)) {
+          const session = requireUserAuth(request, response, userSessions);
+          if (!session) return;
+          payload = await userCredentialCopyPayload(options, config, session, systemId, field);
+        } else {
+          payload = await getCredentialCopyPayload(options, config, systemId, field);
+        }
         if (!payload) {
           jsonResponse(response, 404, { error: 'Credential not found' });
           return;
         }
         jsonResponse(response, 200, payload);
+        return;
+      }
+
+      if (url.pathname === '/api/user-login' && request.method === 'POST') {
+        const body = await readRequestBody(request);
+        const user = await authenticatePortalUser(options, body.username, body.password);
+        if (!user) {
+          jsonResponse(response, 401, { error: 'Invalid username or password' });
+          return;
+        }
+        const sessionId = makeSessionId();
+        userSessions.set(sessionId, { ...user, createdAt: Date.now() });
+        jsonResponse(response, 200, { authenticated: true, user }, {
+          'set-cookie': `${USER_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Strict`
+        });
+        return;
+      }
+
+      if (url.pathname === '/api/user-register' && request.method === 'POST') {
+        try {
+          const user = await registerPortalUser(options, await readRequestBody(request));
+          jsonResponse(response, 201, { user });
+        } catch (error) {
+          jsonResponse(response, error.statusCode || 400, { error: error.message });
+        }
+        return;
+      }
+
+      if (url.pathname === '/api/user-password-reset' && request.method === 'POST') {
+        const body = await readRequestBody(request);
+        if (!passwordsMatch(body) || String(body.password || '').length < 6) {
+          jsonResponse(response, 400, { error: 'New passwords do not match or are too short' });
+          return;
+        }
+        const user = await resetPortalUserPassword(options, body);
+        if (!user) {
+          jsonResponse(response, 404, { error: 'User and email do not match' });
+          return;
+        }
+        jsonResponse(response, 200, { user });
+        return;
+      }
+
+      if (url.pathname === '/api/user-password' && request.method === 'PUT') {
+        const session = requireUserAuth(request, response, userSessions);
+        if (!session) return;
+        const user = await changePortalUserPassword(options, session, await readRequestBody(request));
+        if (!user) {
+          jsonResponse(response, 400, { error: 'Current password is invalid or new password is too short' });
+          return;
+        }
+        jsonResponse(response, 200, { user });
+        return;
+      }
+
+      if (url.pathname === '/api/user-logout' && request.method === 'POST') {
+        const cookies = parseCookies(request.headers.cookie);
+        if (cookies[USER_SESSION_COOKIE]) userSessions.delete(cookies[USER_SESSION_COOKIE]);
+        jsonResponse(response, 200, { authenticated: false }, {
+          'set-cookie': `${USER_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict`
+        });
+        return;
+      }
+
+      if (url.pathname === '/api/user-credentials' && request.method === 'GET') {
+        const session = requireUserAuth(request, response, userSessions);
+        if (!session) return;
+        jsonResponse(response, 200, await userCredentialsList(options, await readConfig(configPath), session));
+        return;
+      }
+
+      const userCredentialMatch = url.pathname.match(/^\/api\/user-credentials\/([^/]+)$/);
+      if (userCredentialMatch && request.method === 'PUT') {
+        const session = requireUserAuth(request, response, userSessions);
+        if (!session) return;
+        const payload = await saveUserCredential(
+          options,
+          await readConfig(configPath),
+          session,
+          decodeURIComponent(userCredentialMatch[1]),
+          await readRequestBody(request)
+        );
+        if (!payload) {
+          jsonResponse(response, 404, { error: 'System not found' });
+          return;
+        }
+        jsonResponse(response, 200, payload);
+        return;
+      }
+
+      if (userCredentialMatch && request.method === 'DELETE') {
+        const session = requireUserAuth(request, response, userSessions);
+        if (!session) return;
+        jsonResponse(response, 200, await deleteUserCredential(options, session, decodeURIComponent(userCredentialMatch[1])));
         return;
       }
 
@@ -1549,7 +1980,7 @@ function createServer(options = {}) {
           jsonResponse(response, 401, { error: 'Invalid password' });
           return;
         }
-        const sessionId = crypto.randomBytes(32).toString('base64url');
+        const sessionId = makeSessionId();
         sessions.set(sessionId, { createdAt: Date.now() });
         jsonResponse(response, 200, { authenticated: true }, {
           'set-cookie': `${SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Strict`

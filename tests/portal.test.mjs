@@ -13,9 +13,11 @@ const files = [
   'assets/config.json',
   'assets/app.js',
   'assets/admin.js',
+  'assets/user-settings.js',
   'assets/styles.css',
   'assets/logo.jpg',
   'admin.html',
+  'user-settings.html',
   'server.py',
   'server.js',
   'DEPLOY.md'
@@ -65,6 +67,60 @@ test('client app implements search, category filters, and empty state hooks', as
   assert.match(app, /function filterSystems/);
   assert.match(app, /function renderCategories/);
   assert.match(app, /empty-state/);
+});
+
+test('portal exposes user login and personal credential settings entry points', async () => {
+  const index = await readFile('index.html', 'utf8');
+  const settingsHtml = await readFile('user-settings.html', 'utf8');
+  const app = await readFile('assets/app.js', 'utf8');
+  const settings = await readFile('assets/user-settings.js', 'utf8');
+
+  assert.match(index, /assets\/app\.js/);
+  assert.match(settingsHtml, /id="user-settings-root"/);
+  assert.match(settingsHtml, /assets\/user-settings\.js/);
+  assert.match(app, /api\/user-session/);
+  assert.match(app, /api\/user-login/);
+  assert.match(app, /api\/user-logout/);
+  assert.match(app, /function renderUserLogin/);
+  assert.match(app, /href="user-settings\.html"/);
+  assert.match(settings, /api\/user-credentials/);
+  assert.match(settings, /data-save-credential/);
+  assert.match(settings, /data-clear-credential/);
+  assert.match(settings, /data-toggle-password/);
+  assert.match(settings, /function toggleCredentialPassword/);
+  assert.match(settings, /credential-password-field/);
+  assert.match(settings, /\/api\/credential-copy\/\$\{encodeURIComponent\(systemId\)\}\/password/);
+  assert.match(settings, /systemUsername/);
+  assert.match(settings, /systemPassword/);
+});
+
+test('portal exposes user registration, password recovery, user menu, password copy buttons, and institute carousel', async () => {
+  const app = await readFile('assets/app.js', 'utf8');
+  const styles = await readFile('assets/styles.css', 'utf8');
+
+  assert.match(app, /api\/user-register/);
+  assert.match(app, /api\/user-password-reset/);
+  assert.match(app, /api\/user-password/);
+  assert.match(app, /api\/user-departments/);
+  assert.match(app, /function renderUserRegister/);
+  assert.match(app, /function renderPasswordReset/);
+  assert.match(app, /function renderDepartmentOptions/);
+  assert.match(app, /name="department"[^>]*required/);
+  assert.match(app, /name="passwordConfirm"[^>]*required/);
+  assert.match(app, /name="email"/);
+  assert.match(app, /validateRequiredFields/);
+  assert.match(app, /validateMatchingPasswords/);
+  assert.match(app, /data-user-menu/);
+  assert.match(app, /data-change-password/);
+  assert.match(app, /data-copy-credential="password"/);
+  assert.match(app, /hero-carousel/);
+  assert.match(app, /https:\/\/www\.imbcams\.ac\.cn\//);
+  assert.doesNotMatch(app, /<button class="button button-secondary" type="button" data-user-logout>退出<\/button>/);
+  assert.match(styles, /\.user-menu-panel/);
+  assert.match(styles, /\.auth-links/);
+  assert.match(styles, /\.hero-carousel/);
+  assert.match(styles, /\.card-password-copy/);
+  assert.match(styles, /\.system-card-top-actions/);
 });
 
 test('public portal links to admin page and uses a compact five-column card wall on desktop', async () => {
@@ -509,6 +565,327 @@ test('admin backend stores launch credentials outside the public config', async 
     assert.match(html, /window\.location\.replace\('\/proxy\/credential-launch-system\/login'\)/);
     assert.match(html, /launch-user/);
     assert.match(html, /launch-secret/);
+  } finally {
+    await new Promise((resolve) => app.close(resolve));
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('portal users can log in and manage their own per-system credentials', async () => {
+  const { createServer } = await import('../server.js');
+  const tempRoot = await mkdtemp(join(tmpdir(), 'portal-users-'));
+  await mkdir(join(tempRoot, 'assets'), { recursive: true });
+  const config = JSON.parse(await readFile('assets/config.json', 'utf8'));
+  config.systems = [
+    {
+      id: 'asset',
+      name: 'Asset Ledger',
+      description: 'Ledger system',
+      category: 'common',
+      icon: 'database',
+      image: '',
+      tags: ['ledger'],
+      status: 'available',
+      url: 'https://asset.example.test/login',
+      credentialProfile: 'global-asset'
+    },
+    {
+      id: 'plain',
+      name: 'Plain System',
+      description: 'No credentials yet',
+      category: 'common',
+      icon: 'database',
+      image: '',
+      tags: ['plain'],
+      status: 'available',
+      url: 'https://plain.example.test'
+    }
+  ];
+  await writeFile(join(tempRoot, 'assets/config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+  const userCredentialsPath = join(tempRoot, 'secure', 'user-credentials.json');
+  const app = createServer({
+    rootDir: tempRoot,
+    portalUsers: {
+      alice: { password: 'alice-pass', displayName: 'Alice' },
+      bob: { password: 'bob-pass', displayName: 'Bob' }
+    },
+    launchCredentials: {
+      'global-asset': {
+        username: 'global-user',
+        password: 'global-secret',
+        loginUrl: 'https://asset.example.test/login',
+        launchMode: 'direct'
+      }
+    },
+    userCredentialsPath
+  });
+
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${app.address().port}`;
+
+  try {
+    const rejectedConfig = await fetch(`${baseUrl}/api/public-config`);
+    assert.equal(rejectedConfig.status, 401);
+
+    const badLogin = await fetch(`${baseUrl}/api/user-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 'wrong' })
+    });
+    assert.equal(badLogin.status, 401);
+
+    const login = await fetch(`${baseUrl}/api/user-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 'alice-pass' })
+    });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get('set-cookie');
+    assert.match(cookie, /portal_user_session=/);
+    assert.match(cookie, /HttpOnly/);
+
+    const session = await fetch(`${baseUrl}/api/user-session`, { headers: { cookie } });
+    assert.equal(session.status, 200);
+    const sessionPayload = await session.json();
+    assert.equal(sessionPayload.authenticated, true);
+    assert.equal(sessionPayload.user.username, 'alice');
+    assert.equal(sessionPayload.user.displayName, 'Alice');
+
+    const firstConfig = await fetch(`${baseUrl}/api/public-config`, { headers: { cookie } });
+    assert.equal(firstConfig.status, 200);
+    const firstConfigPayload = await firstConfig.json();
+    const firstAsset = firstConfigPayload.systems.find((system) => system.id === 'asset');
+    assert.equal(firstAsset.hasLaunchUsername, false);
+    assert.equal(firstAsset.hasLaunchPassword, false);
+
+    const save = await fetch(`${baseUrl}/api/user-credentials/asset`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ username: 'alice-asset', password: 'alice-secret' })
+    });
+    assert.equal(save.status, 200);
+    const savePayload = await save.json();
+    assert.equal(savePayload.systemId, 'asset');
+    assert.equal(savePayload.credential.username, 'alice-asset');
+    assert.equal(savePayload.credential.hasPassword, true);
+    assert.equal(savePayload.credential.password, undefined);
+
+    const savedFile = JSON.parse(await readFile(userCredentialsPath, 'utf8'));
+    assert.equal(savedFile.alice.asset.username, 'alice-asset');
+    assert.equal(savedFile.alice.asset.password, 'alice-secret');
+    assert.equal(savedFile.alice.asset.loginUrl, 'https://asset.example.test/login');
+    assert.equal(savedFile.alice.asset.launchMode, 'direct');
+
+    const credentialsList = await fetch(`${baseUrl}/api/user-credentials`, { headers: { cookie } });
+    assert.equal(credentialsList.status, 200);
+    const credentialsPayload = await credentialsList.json();
+    const listedAsset = credentialsPayload.systems.find((system) => system.id === 'asset');
+    assert.equal(listedAsset.credential.username, 'alice-asset');
+    assert.equal(listedAsset.credential.hasPassword, true);
+    assert.equal(listedAsset.credential.password, undefined);
+
+    const secondConfig = await fetch(`${baseUrl}/api/public-config`, { headers: { cookie } });
+    const secondAsset = (await secondConfig.json()).systems.find((system) => system.id === 'asset');
+    assert.equal(secondAsset.hasLaunchUsername, true);
+    assert.equal(secondAsset.hasLaunchPassword, true);
+    assert.equal(secondAsset.launchHref, 'https://asset.example.test/login');
+
+    const copiedPassword = await fetch(`${baseUrl}/api/credential-copy/asset/password`, { headers: { cookie } });
+    assert.equal(copiedPassword.status, 200);
+    assert.deepEqual(await copiedPassword.json(), { field: 'password', value: 'alice-secret' });
+
+    const copiedUsername = await fetch(`${baseUrl}/api/credential-copy/asset/username`, { headers: { cookie } });
+    assert.equal(copiedUsername.status, 200);
+    assert.deepEqual(await copiedUsername.json(), { field: 'username', value: 'alice-asset' });
+
+    const launch = await fetch(`${baseUrl}/api/launch/asset`, { headers: { cookie }, redirect: 'manual' });
+    assert.equal(launch.status, 302);
+    assert.equal(launch.headers.get('location'), 'https://asset.example.test/login');
+
+    const bobLogin = await fetch(`${baseUrl}/api/user-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'bob', password: 'bob-pass' })
+    });
+    const bobCookie = bobLogin.headers.get('set-cookie');
+    const bobCopy = await fetch(`${baseUrl}/api/credential-copy/asset/password`, { headers: { cookie: bobCookie } });
+    assert.equal(bobCopy.status, 404);
+
+    const clear = await fetch(`${baseUrl}/api/user-credentials/asset`, {
+      method: 'DELETE',
+      headers: { cookie }
+    });
+    assert.equal(clear.status, 200);
+    const afterClear = JSON.parse(await readFile(userCredentialsPath, 'utf8'));
+    assert.equal(afterClear.alice.asset, undefined);
+  } finally {
+    await new Promise((resolve) => app.close(resolve));
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('portal users can self-register, reset forgotten passwords by email, and change their password', async () => {
+  const { createServer } = await import('../server.js');
+  const tempRoot = await mkdtemp(join(tmpdir(), 'portal-user-accounts-'));
+  await mkdir(join(tempRoot, 'assets'), { recursive: true });
+  await copyFile('assets/config.json', join(tempRoot, 'assets/config.json'));
+  const portalUsersPath = join(tempRoot, 'secure', 'portal-users.json');
+
+  const app = createServer({
+    rootDir: tempRoot,
+    portalUsersPath,
+    portalUsers: {
+      alice: {
+        password: 'old-pass',
+        displayName: 'Alice',
+        department: 'QA',
+        email: 'alice@example.test'
+      },
+      charlie: {
+        password: 'charlie-pass',
+        displayName: 'Charlie',
+        department: 'Production',
+        email: 'charlie@example.test'
+      }
+    }
+  });
+
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${app.address().port}`;
+
+  try {
+    const departments = await fetch(`${baseUrl}/api/user-departments`);
+    assert.equal(departments.status, 200);
+    assert.deepEqual((await departments.json()).departments, ['Production', 'QA']);
+
+    const invalidRegister = await fetch(`${baseUrl}/api/user-register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Blank Department',
+        username: 'blank-department',
+        password: 'bob-new-pass',
+        passwordConfirm: 'bob-new-pass',
+        department: '',
+        email: 'blank@example.test'
+      })
+    });
+    assert.equal(invalidRegister.status, 400);
+
+    const mismatchRegister = await fetch(`${baseUrl}/api/user-register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Mismatch User',
+        username: 'mismatch',
+        password: 'bob-new-pass',
+        passwordConfirm: 'different-pass',
+        department: 'Production',
+        email: 'mismatch@example.test'
+      })
+    });
+    assert.equal(mismatchRegister.status, 400);
+
+    const register = await fetch(`${baseUrl}/api/user-register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Bob User',
+        username: 'bob',
+        password: 'bob-new-pass',
+        passwordConfirm: 'bob-new-pass',
+        department: 'Production',
+        email: 'bob@example.test'
+      })
+    });
+    assert.equal(register.status, 201);
+    const registerPayload = await register.json();
+    assert.equal(registerPayload.user.username, 'bob');
+    assert.equal(registerPayload.user.displayName, 'Bob User');
+    assert.equal(registerPayload.user.department, 'Production');
+    assert.equal(registerPayload.user.email, 'bob@example.test');
+    assert.equal(registerPayload.user.password, undefined);
+
+    const usersFile = JSON.parse(await readFile(portalUsersPath, 'utf8'));
+    assert.equal(usersFile.bob.password, 'bob-new-pass');
+    assert.equal(usersFile.bob.email, 'bob@example.test');
+
+    const duplicate = await fetch(`${baseUrl}/api/user-register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Other Bob',
+        username: 'bob',
+        password: 'another-pass',
+        passwordConfirm: 'another-pass',
+        department: 'QA',
+        email: 'another@example.test'
+      })
+    });
+    assert.equal(duplicate.status, 409);
+
+    const mismatchReset = await fetch(`${baseUrl}/api/user-password-reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        username: 'bob',
+        email: 'bob@example.test',
+        password: 'bob-reset-pass',
+        passwordConfirm: 'different-pass'
+      })
+    });
+    assert.equal(mismatchReset.status, 400);
+
+    const reset = await fetch(`${baseUrl}/api/user-password-reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        username: 'bob',
+        email: 'bob@example.test',
+        password: 'bob-reset-pass',
+        passwordConfirm: 'bob-reset-pass'
+      })
+    });
+    assert.equal(reset.status, 200);
+    const afterReset = JSON.parse(await readFile(portalUsersPath, 'utf8'));
+    assert.equal(afterReset.bob.password, 'bob-reset-pass');
+
+    const login = await fetch(`${baseUrl}/api/user-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'bob', password: 'bob-reset-pass' })
+    });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get('set-cookie');
+
+    const mismatchChange = await fetch(`${baseUrl}/api/user-password`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ currentPassword: 'bob-reset-pass', password: 'bob-final-pass', passwordConfirm: 'different-pass' })
+    });
+    assert.equal(mismatchChange.status, 400);
+
+    const change = await fetch(`${baseUrl}/api/user-password`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ currentPassword: 'bob-reset-pass', password: 'bob-final-pass', passwordConfirm: 'bob-final-pass' })
+    });
+    assert.equal(change.status, 200);
+
+    const oldLogin = await fetch(`${baseUrl}/api/user-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'bob', password: 'bob-reset-pass' })
+    });
+    assert.equal(oldLogin.status, 401);
+
+    const newLogin = await fetch(`${baseUrl}/api/user-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'bob', password: 'bob-final-pass' })
+    });
+    assert.equal(newLogin.status, 200);
   } finally {
     await new Promise((resolve) => app.close(resolve));
     await rm(tempRoot, { recursive: true, force: true });

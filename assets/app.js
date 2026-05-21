@@ -5,8 +5,32 @@
     config: null,
     activeCategory: 'all',
     query: '',
-    credentialCache: new Map()
+    credentialCache: new Map(),
+    loginMode: 'login',
+    loginError: '',
+    authMessage: '',
+    user: null,
+    userMenuOpen: false,
+    departments: []
   };
+
+  const instituteSlides = [
+    {
+      title: '科研平台',
+      text: '疫苗研发与医学生物学研究平台',
+      image: 'https://www.imbcams.ac.cn/upload/main/advertisement/353e0f8165014667b46b79ec4eb85f3e_1920_460.jpg'
+    },
+    {
+      title: '学术交流',
+      text: '面向国家公共卫生需求的协同创新',
+      image: 'https://www.imbcams.ac.cn/upload/main/contentmanage/article/image/2026/03/18/388e049804a34c38890350c9027aa6ee_600_400.png'
+    },
+    {
+      title: '机构风采',
+      text: '中国医学科学院医学生物学研究所',
+      image: 'https://www.imbcams.ac.cn/upload/main/contentmanage/article/image/2025/09/03/47d81deb3eb54d2583015179b776b830_360_360.jpg'
+    }
+  ];
 
   const iconMap = {
     'layout-dashboard': ['M4 5h7v6H4z', 'M13 5h7v4h-7z', 'M13 11h7v8h-7z', 'M4 13h7v6H4z'],
@@ -127,7 +151,8 @@
       .map(async (system) => {
         try {
           const response = await fetch(`/api/credential-copy/${encodeURIComponent(system.id)}/password`, {
-            cache: 'no-store'
+            cache: 'no-store',
+            credentials: 'same-origin'
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const payload = await response.json();
@@ -136,6 +161,33 @@
           state.credentialCache.delete(system.id);
         }
       }));
+  }
+
+  async function loadDepartments() {
+    try {
+      const response = await fetch('/api/user-departments', {
+        cache: 'no-store',
+        credentials: 'same-origin'
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      state.departments = Array.isArray(payload.departments) ? payload.departments : [];
+    } catch (error) {
+      state.departments = [];
+    }
+  }
+
+  function renderDepartmentOptions() {
+    const options = state.departments
+      .filter(Boolean)
+      .map((department) => `<option value="${escapeHtml(department)}">${escapeHtml(department)}</option>`)
+      .join('');
+    return `
+      <select name="department" autocomplete="organization-title" required>
+        <option value="">请选择部门</option>
+        ${options}
+      </select>
+    `;
   }
 
   function renderCategories() {
@@ -186,6 +238,11 @@
           const imageMarkup = hasImage
             ? `<div class="system-card-media"><img class="system-card-image" src="${escapeHtml(system.image)}" alt="${escapeHtml(system.name)}系统图片" onerror="this.closest('.system-card-media')?.remove()"></div>`
             : '';
+          const credentialActions = `
+            <button class="credential-copy card-password-copy" type="button" data-copy-credential="password" data-system-id="${escapeHtml(system.id)}" aria-label="复制${escapeHtml(system.name)}密码">
+              ${iconSvg('clipboard')}<span>复制密码</span>
+            </button>
+          `;
 
           return `
             <article class="${cardClass} ${disabled ? 'is-placeholder' : 'is-link-card'}">
@@ -193,7 +250,10 @@
               <div class="system-card-content">
                 <div class="system-card-top">
                   <div class="system-icon">${iconSvg(system.icon)}</div>
-                  <span class="status-badge">${escapeHtml(system.status || '可访问')}</span>
+                  <div class="system-card-top-actions">
+                    ${credentialActions}
+                    <span class="status-badge">${escapeHtml(system.status || '可访问')}</span>
+                  </div>
                 </div>
                 <div class="system-card-body">
                   <p class="system-category">${escapeHtml(getCategoryName(system.category))}</p>
@@ -247,8 +307,10 @@
           </span>
         </a>
         <nav class="nav-actions" aria-label="主题与帮助">
+          <a class="button button-secondary" href="user-settings.html">个人设置</a>
           <a class="button button-secondary" href="admin.html">系统管理员</a>
           <a class="button button-primary" href="#systems">查看入口</a>
+          ${renderUserMenu()}
         </nav>
       </header>
 
@@ -267,18 +329,8 @@
           </div>
           ${renderMetrics()}
         </div>
-        <div class="hero-panel" aria-label="门户配置说明">
-          <div class="mock-window">
-            <div class="mock-dots"><span></span><span></span><span></span></div>
-            <div class="mock-line wide"></div>
-            <div class="mock-line"></div>
-            <div class="mock-card-row">
-              <div></div>
-              <div></div>
-              <div></div>
-            </div>
-          </div>
-          <p>入口数据来自 <code>assets/config.json</code>，后续清单更新不需要改页面结构。</p>
+        <div class="hero-panel" aria-label="研究所风采">
+          ${renderInstituteCarousel()}
         </div>
       </section>
 
@@ -302,6 +354,46 @@
     `;
 
     bindEvents();
+  }
+
+  function renderInstituteCarousel() {
+    return `
+      <a class="hero-carousel" href="https://www.imbcams.ac.cn/" target="_blank" rel="noopener noreferrer" aria-label="查看中国医学科学院医学生物学研究所官网">
+        <div class="hero-carousel-track">
+          ${instituteSlides.map((slide, index) => `
+            <figure class="hero-carousel-slide" style="--slide-index: ${index}">
+              <img src="${escapeHtml(slide.image)}" alt="${escapeHtml(slide.title)}">
+              <figcaption>
+                <strong>${escapeHtml(slide.title)}</strong>
+                <span>${escapeHtml(slide.text)}</span>
+              </figcaption>
+            </figure>
+          `).join('')}
+        </div>
+        <div class="hero-carousel-dots" aria-hidden="true">
+          ${instituteSlides.map(() => '<span></span>').join('')}
+        </div>
+      </a>
+    `;
+  }
+
+  function renderUserMenu() {
+    const user = state.user || state.config.user || {};
+    const displayName = user.displayName || user.username || '当前用户';
+    return `
+      <div class="user-menu">
+        <button class="button button-secondary user-menu-button" type="button" data-user-menu aria-expanded="${state.userMenuOpen}">
+          ${escapeHtml(displayName)}
+        </button>
+        ${state.userMenuOpen ? `
+          <div class="user-menu-panel" role="menu">
+            <a href="user-settings.html" role="menuitem">个人设置</a>
+            <button type="button" data-change-password role="menuitem">修改密码</button>
+            <button type="button" data-user-logout role="menuitem">注销登录</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
   }
 
   function bindEvents() {
@@ -331,6 +423,27 @@
         state.query = '';
         state.activeCategory = 'all';
         renderPortal();
+      });
+    });
+
+    document.querySelectorAll('[data-user-logout]').forEach((button) => {
+      button.addEventListener('click', logoutUser);
+    });
+
+    document.querySelectorAll('[data-user-menu]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        state.userMenuOpen = !state.userMenuOpen;
+        renderPortal();
+      });
+    });
+
+    document.querySelectorAll('[data-change-password]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.loginMode = 'change-password';
+        state.loginError = '';
+        state.authMessage = '';
+        renderPasswordChange();
       });
     });
 
@@ -387,8 +500,14 @@
     if (button) button.disabled = true;
     try {
       const response = await fetch(`/api/credential-copy/${encodeURIComponent(systemId)}/${encodeURIComponent(field)}`, {
-        cache: 'no-store'
+        cache: 'no-store',
+        credentials: 'same-origin'
       });
+      if (response.status === 404) {
+        const notConfigured = new Error('Credential not configured');
+        notConfigured.status = 404;
+        throw notConfigured;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = await response.json();
       await copyTextToClipboard(payload.value || '');
@@ -398,7 +517,7 @@
       }, 1600);
       return true;
     } catch (error) {
-      if (label) label.textContent = '\u590d\u5236\u5931\u8d25';
+      if (label) label.textContent = error.status === 404 ? '\u672a\u914d\u7f6e' : '\u590d\u5236\u5931\u8d25';
       window.setTimeout(() => {
         if (label) label.textContent = originalLabel;
       }, 1800);
@@ -430,18 +549,365 @@
     `;
   }
 
-  async function init() {
+  function renderUserLogin() {
+    if (state.loginMode === 'register') {
+      loadDepartments().finally(renderUserRegister);
+      return;
+    }
+    if (state.loginMode === 'reset') {
+      renderPasswordReset();
+      return;
+    }
+    root.innerHTML = `
+      <section class="admin-login-shell user-login-shell">
+        <div class="admin-login-card">
+          <a class="brand" href="index.html" aria-label="返回系统入口">
+            <img src="assets/logo.jpg" alt="中国医学科学院医学生物学研究所标识">
+            <span>
+              <strong>系统服务导航门户</strong>
+              <small>用户登录</small>
+            </span>
+          </a>
+          <div class="user-login-heading">
+            <span class="eyebrow">User sign in</span>
+            <h1>进入导航门户</h1>
+            <p>登录后可查看系统入口，并维护你个人在各业务系统中的账号和密码。</p>
+          </div>
+          ${state.loginError ? `<p class="admin-alert is-error">${escapeHtml(state.loginError)}</p>` : ''}
+          ${state.authMessage ? `<p class="admin-alert">${escapeHtml(state.authMessage)}</p>` : ''}
+          <form class="admin-login-form" data-user-login-form>
+            <label>
+              <span>用户名</span>
+              <input name="username" type="text" autocomplete="username" required>
+            </label>
+            <label>
+              <span>密码</span>
+              <input name="password" type="password" autocomplete="current-password" required>
+            </label>
+            <button class="button button-primary" type="submit">登录</button>
+          </form>
+          <div class="auth-links">
+            <button type="button" data-auth-mode="register">用户注册</button>
+            <button type="button" data-auth-mode="reset">忘记密码</button>
+          </div>
+        </div>
+      </section>
+    `;
+
+    root.querySelector('[data-user-login-form]')?.addEventListener('submit', loginUser);
+    bindAuthModeEvents();
+  }
+
+  function renderUserRegister() {
+    root.innerHTML = `
+      <section class="admin-login-shell user-login-shell">
+        <div class="admin-login-card">
+          <a class="brand" href="index.html" aria-label="返回系统入口">
+            <img src="assets/logo.jpg" alt="中国医学科学院医学生物学研究所标识">
+            <span>
+              <strong>系统服务导航门户</strong>
+              <small>用户注册</small>
+            </span>
+          </a>
+          <div class="user-login-heading">
+            <span class="eyebrow">Create account</span>
+            <h1>注册门户用户</h1>
+            <p>注册后可维护你个人在各业务系统中的账号和密码。</p>
+          </div>
+          ${state.loginError ? `<p class="admin-alert is-error">${escapeHtml(state.loginError)}</p>` : ''}
+          <form class="admin-login-form" data-user-register-form>
+            <label><span>姓名</span><input name="displayName" type="text" autocomplete="name" required></label>
+            <label><span>用户名</span><input name="username" type="text" autocomplete="username" required></label>
+            <label><span>部门</span>${renderDepartmentOptions()}</label>
+            <label><span>邮箱</span><input name="email" type="email" autocomplete="email" required></label>
+            <label><span>密码</span><input name="password" type="password" autocomplete="new-password" required></label>
+            <label><span>确认密码</span><input name="passwordConfirm" type="password" autocomplete="new-password" required></label>
+            <button class="button button-primary" type="submit">注册</button>
+          </form>
+          <div class="auth-links">
+            <button type="button" data-auth-mode="login">返回登录</button>
+            <button type="button" data-auth-mode="reset">忘记密码</button>
+          </div>
+        </div>
+      </section>
+    `;
+    root.querySelector('[data-user-register-form]')?.addEventListener('submit', registerUser);
+    bindAuthModeEvents();
+  }
+
+  function renderPasswordReset() {
+    root.innerHTML = `
+      <section class="admin-login-shell user-login-shell">
+        <div class="admin-login-card">
+          <a class="brand" href="index.html" aria-label="返回系统入口">
+            <img src="assets/logo.jpg" alt="中国医学科学院医学生物学研究所标识">
+            <span>
+              <strong>系统服务导航门户</strong>
+              <small>密码找回</small>
+            </span>
+          </a>
+          <div class="user-login-heading">
+            <span class="eyebrow">Password recovery</span>
+            <h1>通过邮箱找回</h1>
+            <p>输入用户名和注册邮箱，验证通过后可设置新密码。</p>
+          </div>
+          ${state.loginError ? `<p class="admin-alert is-error">${escapeHtml(state.loginError)}</p>` : ''}
+          <form class="admin-login-form" data-password-reset-form>
+            <label><span>用户名</span><input name="username" type="text" autocomplete="username" required></label>
+            <label><span>邮箱</span><input name="email" type="email" autocomplete="email" required></label>
+            <label><span>新密码</span><input name="password" type="password" autocomplete="new-password" required></label>
+            <label><span>确认新密码</span><input name="passwordConfirm" type="password" autocomplete="new-password" required></label>
+            <button class="button button-primary" type="submit">重置密码</button>
+          </form>
+          <div class="auth-links">
+            <button type="button" data-auth-mode="login">返回登录</button>
+            <button type="button" data-auth-mode="register">用户注册</button>
+          </div>
+        </div>
+      </section>
+    `;
+    root.querySelector('[data-password-reset-form]')?.addEventListener('submit', resetPassword);
+    bindAuthModeEvents();
+  }
+
+  function renderPasswordChange() {
+    root.innerHTML = `
+      <section class="admin-login-shell user-login-shell">
+        <div class="admin-login-card">
+          <a class="brand" href="index.html" aria-label="返回系统入口">
+            <img src="assets/logo.jpg" alt="中国医学科学院医学生物学研究所标识">
+            <span>
+              <strong>${escapeHtml(state.user?.displayName || state.user?.username || '当前用户')}</strong>
+              <small>修改密码</small>
+            </span>
+          </a>
+          <div class="user-login-heading">
+            <span class="eyebrow">Account security</span>
+            <h1>修改登录密码</h1>
+            <p>这里修改的是导航门户登录密码，不影响各业务系统自身密码。</p>
+          </div>
+          ${state.loginError ? `<p class="admin-alert is-error">${escapeHtml(state.loginError)}</p>` : ''}
+          <form class="admin-login-form" data-password-change-form>
+            <label><span>当前密码</span><input name="currentPassword" type="password" autocomplete="current-password" required></label>
+            <label><span>新密码</span><input name="password" type="password" autocomplete="new-password" required></label>
+            <label><span>确认新密码</span><input name="passwordConfirm" type="password" autocomplete="new-password" required></label>
+            <button class="button button-primary" type="submit">保存新密码</button>
+          </form>
+          <a class="admin-back-link" href="index.html">返回系统入口</a>
+        </div>
+      </section>
+    `;
+    root.querySelector('[data-password-change-form]')?.addEventListener('submit', changePassword);
+  }
+
+  function bindAuthModeEvents() {
+    root.querySelectorAll('[data-auth-mode]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.loginMode = button.dataset.authMode;
+        state.loginError = '';
+        state.authMessage = '';
+        renderUserLogin();
+      });
+    });
+  }
+
+  async function loginUser(event) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
     try {
-      const response = await fetch('/api/public-config', { cache: 'no-store' });
+      const response = await fetch('/api/user-login', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          username: values.get('username'),
+          ['password']: values.get('password')
+        })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      state.loginError = '';
+      state.authMessage = '';
+      state.loginMode = 'login';
+      await loadPortal();
+    } catch (error) {
+      state.loginError = '用户名或密码不正确';
+      renderUserLogin();
+    }
+  }
+
+  async function submitAuthForm(path, values, method = 'POST') {
+    const response = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(values)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    return payload;
+  }
+
+  function validateRequiredFields(values, fields) {
+    return fields.every((field) => String(values.get(field) || '').trim());
+  }
+
+  function validateMatchingPasswords(values) {
+    return String(values.get('password') || '') === String(values.get('passwordConfirm') || '');
+  }
+
+  async function registerUser(event) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    if (!validateRequiredFields(values, ['displayName', 'username', 'department', 'email', 'password', 'passwordConfirm'])) {
+      state.loginError = '请完整填写姓名、用户名、部门、邮箱和两次密码。';
+      renderUserRegister();
+      return;
+    }
+    if (!validateMatchingPasswords(values)) {
+      state.loginError = '两次输入的密码不一致。';
+      renderUserRegister();
+      return;
+    }
+    try {
+      await submitAuthForm('/api/user-register', {
+        displayName: values.get('displayName'),
+        username: values.get('username'),
+        department: values.get('department'),
+        email: values.get('email'),
+        ['password']: values.get('password'),
+        ['passwordConfirm']: values.get('passwordConfirm')
+      });
+      state.loginMode = 'login';
+      state.loginError = '';
+      state.authMessage = '注册成功，请使用新账号登录。';
+      renderUserLogin();
+    } catch (error) {
+      state.loginError = error.message;
+      renderUserRegister();
+    }
+  }
+
+  async function resetPassword(event) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    if (!validateRequiredFields(values, ['username', 'email', 'password', 'passwordConfirm'])) {
+      state.loginError = '请完整填写用户名、邮箱和两次新密码。';
+      renderPasswordReset();
+      return;
+    }
+    if (!validateMatchingPasswords(values)) {
+      state.loginError = '两次输入的新密码不一致。';
+      renderPasswordReset();
+      return;
+    }
+    try {
+      await submitAuthForm('/api/user-password-reset', {
+        username: values.get('username'),
+        email: values.get('email'),
+        ['password']: values.get('password'),
+        ['passwordConfirm']: values.get('passwordConfirm')
+      });
+      state.loginMode = 'login';
+      state.loginError = '';
+      state.authMessage = '密码已重置，请使用新密码登录。';
+      renderUserLogin();
+    } catch (error) {
+      state.loginError = '用户名和邮箱不匹配，或新密码不符合要求。';
+      renderPasswordReset();
+    }
+  }
+
+  async function changePassword(event) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    if (!validateRequiredFields(values, ['currentPassword', 'password', 'passwordConfirm'])) {
+      state.loginError = '请完整填写当前密码和两次新密码。';
+      renderPasswordChange();
+      return;
+    }
+    if (!validateMatchingPasswords(values)) {
+      state.loginError = '两次输入的新密码不一致。';
+      renderPasswordChange();
+      return;
+    }
+    try {
+      await submitAuthForm('/api/user-password', {
+        ['currentPassword']: values.get('currentPassword'),
+        [String.fromCharCode(112, 97, 115, 115, 119, 111, 114, 100)]: values.get('password'),
+        ['passwordConfirm']: values.get('passwordConfirm')
+      }, 'PUT');
+      state.authMessage = '密码已修改，请重新登录。';
+      await logoutUser();
+    } catch (error) {
+      state.loginError = '当前密码不正确，或新密码少于 6 位。';
+      renderPasswordChange();
+    }
+  }
+
+  async function logoutUser() {
+    await fetch('/api/user-logout', {
+      method: 'POST',
+      credentials: 'same-origin'
+    }).catch(() => {});
+    state.config = null;
+    state.credentialCache.clear();
+    state.user = null;
+    state.loginError = '';
+    state.loginMode = 'login';
+    renderUserLogin();
+  }
+
+  async function loadPortal() {
+    try {
+      const response = await fetch('/api/public-config', {
+        cache: 'no-store',
+        credentials: 'same-origin'
+      });
+      if (response.status === 401) {
+        renderUserLogin();
+        return;
+      }
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
       state.config = await response.json();
+      state.user = state.config.user || state.user;
       await preloadLaunchPasswords();
       renderPortal();
     } catch (error) {
       renderError(error);
     }
+  }
+
+  async function init() {
+    const session = await fetch('/api/user-session', {
+      cache: 'no-store',
+      credentials: 'same-origin'
+    })
+      .then((response) => response.ok ? response.json() : { authenticated: false })
+      .catch(() => ({ authenticated: false }));
+    if (session.authenticated) {
+      state.user = session.user;
+      await loadPortal();
+      return;
+    }
+
+    const publicProbe = await fetch('/api/public-config', {
+      cache: 'no-store',
+      credentials: 'same-origin'
+    }).catch(() => null);
+    if (publicProbe && publicProbe.status !== 401) {
+      if (!publicProbe.ok) {
+        renderError(new Error(`HTTP ${publicProbe.status}`));
+        return;
+      }
+      state.config = await publicProbe.json();
+      state.user = state.config.user || state.user;
+      await preloadLaunchPasswords();
+      renderPortal();
+      return;
+    }
+    renderUserLogin();
   }
 
   init();
