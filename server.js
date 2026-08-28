@@ -1,6 +1,6 @@
 const http = require('node:http');
 const { createReadStream } = require('node:fs');
-const { access, copyFile, mkdir, readFile, rename, writeFile } = require('node:fs/promises');
+const { access, copyFile, mkdir, readFile, rename, stat, writeFile } = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
@@ -18,6 +18,25 @@ const contentTypes = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon'
 };
+
+function staticCacheControl(filePath) {
+  const normalized = filePath.replace(/\\/g, '/');
+  const extension = path.extname(filePath).toLowerCase();
+
+  if (normalized.endsWith('/assets/config.json')) {
+    return 'no-store';
+  }
+  if (extension === '.html') {
+    return 'no-cache';
+  }
+  if (['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg', '.ico'].includes(extension)) {
+    return 'public, max-age=31536000, immutable';
+  }
+  if (['.js', '.css'].includes(extension)) {
+    return 'public, max-age=86400';
+  }
+  return 'no-cache';
+}
 
 function jsonResponse(response, status, payload, headers = {}) {
   response.writeHead(status, {
@@ -253,15 +272,22 @@ async function serveStatic(rootDir, requestPath, response) {
     return;
   }
 
+  let fileStat;
   try {
-    await access(filePath);
+    fileStat = await stat(filePath);
   } catch {
+    textResponse(response, 404, 'Not found');
+    return;
+  }
+  if (!fileStat.isFile()) {
     textResponse(response, 404, 'Not found');
     return;
   }
 
   response.writeHead(200, {
-    'content-type': contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream'
+    'content-type': contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
+    'content-length': String(fileStat.size),
+    'cache-control': staticCacheControl(filePath)
   });
   createReadStream(filePath).pipe(response);
 }

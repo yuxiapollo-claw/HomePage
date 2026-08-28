@@ -247,6 +247,20 @@ def normalize_system(payload, existing_id=None):
     }
 
 
+def static_cache_control(file_path):
+    normalized = file_path.replace(os.sep, '/')
+    extension = os.path.splitext(file_path)[1].lower()
+    if normalized.endswith('/assets/config.json'):
+        return 'no-store'
+    if extension == '.html':
+        return 'no-cache'
+    if extension in ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg', '.ico']:
+        return 'public, max-age=31536000, immutable'
+    if extension in ['.js', '.css']:
+        return 'public, max-age=86400'
+    return 'no-cache'
+
+
 class PortalHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     server_version = 'ServicePortal/1.0'
 
@@ -406,6 +420,7 @@ class PortalHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(os.path.getsize(file_path)))
+        self.send_header('Cache-Control', static_cache_control(file_path))
         self.end_headers()
         with open(file_path, 'rb') as handle:
             shutil.copyfileobj(handle, self.wfile)

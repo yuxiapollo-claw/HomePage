@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, mkdir, copyFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, mkdir, copyFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,7 @@ const files = [
   'assets/admin.js',
   'assets/styles.css',
   'assets/logo.jpg',
+  'assets/logo-small.jpg',
   'admin.html',
   'server.py',
   'server.js',
@@ -46,6 +47,25 @@ test('both theme pages mount the shared portal renderer', async () => {
   assert.match(starbucks, /assets\/app\.js/);
 });
 
+test('public pages use the optimized logo asset for first paint', async () => {
+  const mintlify = await readFile('index.html', 'utf8');
+  const starbucks = await readFile('starbucks.html', 'utf8');
+  const app = await readFile('assets/app.js', 'utf8');
+  const logo = await stat('assets/logo-small.jpg');
+
+  assert.ok(logo.size < 100 * 1024, 'optimized logo should stay below 100KB');
+  assert.match(mintlify, /src="assets\/logo-small\.jpg"/);
+  assert.match(starbucks, /src="assets\/logo-small\.jpg"/);
+  assert.match(app, /src="assets\/logo-small\.jpg"/);
+});
+
+test('system card images do not block initial page load', async () => {
+  const app = await readFile('assets/app.js', 'utf8');
+
+  assert.match(app, /loading="lazy"/);
+  assert.match(app, /decoding="async"/);
+});
+
 test('package and deployment docs describe the authenticated node server', async () => {
   const pkg = JSON.parse(await readFile('package.json', 'utf8'));
   const deploy = await readFile('DEPLOY.md', 'utf8');
@@ -65,25 +85,63 @@ test('client app implements search, category filters, and empty state hooks', as
   assert.match(app, /empty-state/);
 });
 
-test('public portal links to admin page and uses a compact five-column card wall on desktop', async () => {
+test('public portal links to admin page and uses the institutional editorial directory layout', async () => {
   const app = await readFile('assets/app.js', 'utf8');
   const styles = await readFile('assets/styles.css', 'utf8');
 
   assert.match(app, /href="admin\.html"/);
+  assert.match(app, /Institute service index/);
+  assert.match(app, /function categoryCounts/);
+  assert.match(app, /function renderCategorySummary/);
+  assert.match(app, /catalog-heading/);
+  assert.match(app, /system-card-footer/);
   assert.match(app, /system\.image/);
   assert.match(app, /system-card-layout/);
   assert.match(app, /system-card-image/);
   assert.match(app, /portal-divider-line"><\/div>\s*<div class="portal-divider-line"/);
   assert.doesNotMatch(app, /theme-chip/);
   assert.doesNotMatch(app, /section-heading/);
+  assert.match(styles, /--brand-blue:\s*#003888/);
+  assert.match(styles, /--brand-green:\s*#009838/);
+  assert.match(styles, /\.catalog-heading/);
+  assert.match(styles, /\.category-summary/);
   assert.match(styles, /\.system-card-image/);
-  assert.match(styles, /\.system-grid\s*{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/s);
+  assert.match(styles, /\.system-grid\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
   assert.match(styles, /\.system-card-layout/);
-  assert.match(styles, /\.system-card-layout\s*{[^}]*grid-template-columns:\s*1fr/s);
-  assert.match(styles, /\.system-card-media\s*{[^}]*min-height:\s*78px/s);
-  assert.match(styles, /\.hero-section\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.25fr\)\s+minmax\(240px,\s*0\.58fr\)/s);
-  assert.match(styles, /\.portal-divider\s*{[^}]*height:\s*4px/s);
+  assert.match(styles, /\.system-card-layout\s*{[^}]*grid-template-rows:\s*1fr auto/s);
+  assert.match(styles, /\.system-card-media\s*{[^}]*min-height:\s*112px/s);
+  assert.match(styles, /\.hero-section\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.1fr\)\s+minmax\(320px,\s*0\.62fr\)/s);
+  assert.match(styles, /\.portal-divider\s*{[^}]*height:\s*6px/s);
   assert.match(styles, /aspect-ratio:\s*16 \/ 9/);
+});
+
+test('node static server caches assets but not live config', async () => {
+  const { createServer } = await import('../server.js');
+  const app = createServer();
+
+  await new Promise((resolve) => app.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${app.address().port}`;
+
+  try {
+    const script = await fetch(`${baseUrl}/assets/app.js`);
+    assert.equal(script.status, 200);
+    assert.match(script.headers.get('cache-control') || '', /public/);
+    assert.match(script.headers.get('cache-control') || '', /max-age=86400/);
+    assert.ok(Number(script.headers.get('content-length')) > 0);
+
+    const logo = await fetch(`${baseUrl}/assets/logo-small.jpg`);
+    assert.equal(logo.status, 200);
+    assert.match(logo.headers.get('cache-control') || '', /max-age=31536000/);
+    assert.match(logo.headers.get('cache-control') || '', /immutable/);
+    assert.ok(Number(logo.headers.get('content-length')) > 0);
+
+    const config = await fetch(`${baseUrl}/assets/config.json`);
+    assert.equal(config.status, 200);
+    assert.match(config.headers.get('cache-control') || '', /no-store/);
+    assert.ok(Number(config.headers.get('content-length')) > 0);
+  } finally {
+    await new Promise((resolve) => app.close(resolve));
+  }
 });
 
 test('main portal nav hides the Starbucks theme switch entry', async () => {

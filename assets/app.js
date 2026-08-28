@@ -57,8 +57,27 @@
     });
   }
 
+  function categoryCounts() {
+    return state.config.systems.reduce((counts, system) => {
+      counts.all += 1;
+      counts[system.category] = (counts[system.category] || 0) + 1;
+      return counts;
+    }, { all: 0 });
+  }
+
+  function activeCategoryName() {
+    return getCategoryName(state.activeCategory);
+  }
+
+  function statusTone(status) {
+    if (status === '可访问') return 'is-ready';
+    if (status === '维护中') return 'is-maintenance';
+    return 'is-pending';
+  }
+
   function renderCategories() {
     const categories = state.config.categories;
+    const counts = categoryCounts();
     return `
       <div class="category-bar" role="tablist" aria-label="系统分类">
         ${categories.map((category) => `
@@ -69,7 +88,8 @@
             aria-selected="${state.activeCategory === category.id}"
             data-category="${escapeHtml(category.id)}"
           >
-            ${escapeHtml(category.name)}
+            <span>${escapeHtml(category.name)}</span>
+            <strong>${escapeHtml(counts[category.id] || 0)}</strong>
           </button>
         `).join('')}
       </div>
@@ -100,23 +120,29 @@
             ? ''
             : ` href="${escapeHtml(system.url)}" target="_blank" rel="noopener noreferrer"`;
           const imageMarkup = hasImage
-            ? `<div class="system-card-media"><img class="system-card-image" src="${escapeHtml(system.image)}" alt="${escapeHtml(system.name)}系统图片" onerror="this.closest('.system-card-media')?.remove()"></div>`
+            ? `<div class="system-card-media"><img class="system-card-image" src="${escapeHtml(system.image)}" alt="${escapeHtml(system.name)}系统图片" loading="lazy" decoding="async" onerror="this.closest('.system-card-media')?.remove()"></div>`
             : '';
 
           return `
             <${cardTag} class="${cardClass} ${disabled ? 'is-placeholder' : 'system-card-link'}"${cardAttributes}>
               <div class="system-card-content">
                 <div class="system-card-top">
-                  <div class="system-icon">${iconSvg(system.icon)}</div>
-                  <span class="status-badge">${escapeHtml(system.status || '可访问')}</span>
+                  <span class="system-category">${escapeHtml(getCategoryName(system.category))}</span>
+                  <span class="status-badge ${statusTone(system.status)}">${escapeHtml(system.status || '可访问')}</span>
                 </div>
                 <div class="system-card-body">
-                  <p class="system-category">${escapeHtml(getCategoryName(system.category))}</p>
-                  <h2>${escapeHtml(system.name)}</h2>
+                  <div class="system-title-line">
+                    <div class="system-icon">${iconSvg(system.icon)}</div>
+                    <h2>${escapeHtml(system.name)}</h2>
+                  </div>
                   <p>${escapeHtml(system.description)}</p>
                 </div>
                 <div class="tag-row">
                   ${tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}
+                </div>
+                <div class="system-card-footer">
+                  <span>${disabled ? '地址待配置' : '新窗口打开'}</span>
+                  <span aria-hidden="true">${disabled ? '待' : '↗'}</span>
                 </div>
               </div>
               ${imageMarkup}
@@ -149,27 +175,41 @@
     `;
   }
 
+  function renderCategorySummary() {
+    const counts = categoryCounts();
+    return `
+      <div class="category-summary" aria-label="分类概览">
+        ${state.config.categories.filter((category) => category.id !== 'all').map((category) => `
+          <button type="button" data-category="${escapeHtml(category.id)}" class="category-summary-item ${state.activeCategory === category.id ? 'is-active' : ''}">
+            <span>${escapeHtml(category.name)}</span>
+            <strong>${escapeHtml(counts[category.id] || 0)}</strong>
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
   function renderPortal() {
     const config = state.config;
     const systems = filterSystems();
     root.innerHTML = `
       <header class="top-nav">
         <a class="brand" href="${theme === 'starbucks' ? 'starbucks.html' : 'index.html'}" aria-label="${escapeHtml(config.organization.portalName)}首页">
-          <img src="assets/logo.jpg" alt="中国医学科学院医学生物学研究所标识">
+          <img src="assets/logo-small.jpg" width="44" height="44" decoding="async" alt="中国医学科学院医学生物学研究所标识">
           <span>
             <strong>${escapeHtml(config.organization.name)}</strong>
             <small>${escapeHtml(config.organization.portalName)}</small>
           </span>
         </a>
         <nav class="nav-actions" aria-label="主题与帮助">
-          <a class="button button-secondary" href="admin.html">系统管理员</a>
-          <a class="button button-primary" href="#systems">查看入口</a>
+          <a class="button button-secondary" href="admin.html">管理配置</a>
+          <a class="button button-primary" href="#systems">入口目录</a>
         </nav>
       </header>
 
       <section class="hero-section">
         <div class="hero-copy">
-          <span class="eyebrow">Internal service portal</span>
+          <span class="eyebrow">Institute service index</span>
           <h1>${escapeHtml(config.organization.portalName)}</h1>
           <p>${escapeHtml(config.organization.description || config.organization.subtitle)}</p>
           <div class="hero-actions">
@@ -183,17 +223,10 @@
           ${renderMetrics()}
         </div>
         <div class="hero-panel" aria-label="门户配置说明">
-          <div class="mock-window">
-            <div class="mock-dots"><span></span><span></span><span></span></div>
-            <div class="mock-line wide"></div>
-            <div class="mock-line"></div>
-            <div class="mock-card-row">
-              <div></div>
-              <div></div>
-              <div></div>
-            </div>
-          </div>
-          <p>入口数据来自 <code>assets/config.json</code>，后续清单更新不需要改页面结构。</p>
+          <div class="panel-kicker">入口清单</div>
+          <h2 id="active-category-name">${escapeHtml(activeCategoryName())}</h2>
+          <p>系统入口、分类和状态由 <code>assets/config.json</code> 集中维护，管理后台保存后前台刷新即生效。</p>
+          ${renderCategorySummary()}
         </div>
       </section>
 
@@ -203,6 +236,13 @@
       </div>
 
       <section id="systems" class="systems-section">
+        <div class="catalog-heading">
+          <div>
+            <span class="eyebrow">Service catalogue</span>
+            <h2>系统入口目录</h2>
+          </div>
+          <p>当前显示 <strong id="result-count">${escapeHtml(systems.length)}</strong> 个入口。可按分类筛选，或搜索系统名称、说明和标签。</p>
+        </div>
         ${renderCategories()}
         <div id="system-results">${renderSystems(systems)}</div>
       </section>
@@ -253,10 +293,23 @@
   function updateResults() {
     const results = document.getElementById('system-results');
     if (!results) return;
-    results.innerHTML = renderSystems(filterSystems());
+    const systems = filterSystems();
+    results.innerHTML = renderSystems(systems);
+    const resultCount = document.getElementById('result-count');
+    if (resultCount) {
+      resultCount.textContent = String(systems.length);
+    }
+    const activeCategory = document.getElementById('active-category-name');
+    if (activeCategory) {
+      activeCategory.textContent = activeCategoryName();
+    }
     const categories = document.querySelector('.category-bar');
     if (categories) {
       categories.outerHTML = renderCategories();
+    }
+    const summary = document.querySelector('.category-summary');
+    if (summary) {
+      summary.outerHTML = renderCategorySummary();
     }
     bindEvents();
   }
